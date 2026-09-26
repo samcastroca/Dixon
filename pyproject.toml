@@ -8,6 +8,8 @@ dependencies = [
     "alembic>=1.16",
     "fastapi>=0.118",
     "httpx>=0.28",
+    "pandas>=3.0.6",
+    "pandera>=0.33.1",
     "psycopg[binary]>=3.2",
     "pydantic>=2.11",
     "pydantic-settings>=2.10",
@@ -24,7 +26,9 @@ predictor = "predictor.cli:app"
 
 [dependency-groups]
 dev = [
+    "hypothesis>=6.168.1",
     "mypy>=1.18",
+    "pandas-stubs>=3.0.5.260914",
     "pre-commit>=4.3",
     "pytest>=8.4",
     "pytest-cov>=7.0",

@@ -1,0 +1,84 @@
+[project]
+name = "predictor"
+version = "0.1.0"
+description = "Sports results prediction platform (EPL + LALIGA): 1X2 probabilities and scoreline distributions"
+readme = "README.md"
+requires-python = "==3.12.*"
+dependencies = [
+    "alembic>=1.16",
+    "fastapi>=0.118",
+    "psycopg[binary]>=3.2",
+    "pydantic>=2.11",
+    "pydantic-settings>=2.10",
+    "pyyaml>=6.0",
+    "sqlalchemy>=2.0",
+    "structlog>=25.4",
+    "typer>=0.17",
+    "uvicorn[standard]>=0.37",
+]
+
+[project.scripts]
+predictor = "predictor.cli:app"
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28",
+    "mypy>=1.18",
+    "pre-commit>=4.3",
+    "pytest>=8.4",
+    "pytest-cov>=7.0",
+    "ruff>=0.14",
+    "types-pyyaml>=6.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/predictor"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle
+    "F",    # pyflakes
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # bugbear
+    "ANN",  # type annotations
+    "S",    # bandit
+    "C4",   # comprehensions
+    "SIM",  # simplify
+    "TID",  # tidy imports
+    "RUF",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106"]  # asserts and dummy credentials are the point
+"alembic/**" = ["ANN"]     # generated migration scaffolding
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src/predictor", "tests"]
+strict = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = "alembic.*"
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+    "integration: needs a live PostgreSQL (docker compose up -d db)",
+]
+
+[tool.coverage.run]
+source = ["src/predictor"]
+omit = ["src/predictor/dashboard/*"]

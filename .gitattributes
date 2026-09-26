@@ -1,0 +1,6 @@
+# Containers run Linux: shell scripts and configs must keep LF, whatever the host does.
+* text=auto eol=lf
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.pdf binary
+uv.lock text eol=lf

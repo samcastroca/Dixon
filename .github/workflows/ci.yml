@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: predictor
+          POSTGRES_PASSWORD: predictor
+          POSTGRES_DB: predictor
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U predictor"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://predictor:predictor@127.0.0.1:5432/predictor
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Apply migrations
+        run: make migrate
+
+      - name: make check
+        run: make check

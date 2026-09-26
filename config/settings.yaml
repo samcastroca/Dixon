@@ -1,0 +1,54 @@
+# Single source of truth for every tunable. No magic numbers in code.
+# Any value can be overridden by an environment variable: PREDICTOR_<SECTION>__<KEY>
+# (e.g. PREDICTOR_DATABASE__HOST=localhost). Secrets live in the environment only.
+
+app:
+  name: predictor
+  version: "0.1.0"
+  log_level: INFO
+  # Everything is stored in this timezone; sources are converted from their local one.
+  storage_timezone: UTC
+
+database:
+  host: db
+  port: 5432
+  name: predictor
+  user: predictor
+  # Seconds before a connection attempt gives up (keeps probes and tests fast).
+  connect_timeout: 5
+  # password: never here, only PREDICTOR_DATABASE__PASSWORD
+
+mlflow:
+  tracking_uri: http://mlflow:5000
+
+api:
+  host: 0.0.0.0
+  port: 8000
+
+# Competitions are data, not code. Adding a league must never require touching logic.
+competitions:
+  - code: EPL
+    sport: football
+    name: English Premier League
+    country: England
+    timezone: Europe/London
+    sources:
+      football_data_uk: E0
+    rules:
+      teams: 20
+      relegation_slots: 3
+      champions_league_slots: 4
+      tiebreaker: goal_difference
+
+  - code: LALIGA
+    sport: football
+    name: LaLiga
+    country: Spain
+    timezone: Europe/Madrid
+    sources:
+      football_data_uk: SP1
+    rules:
+      teams: 20
+      relegation_slots: 3
+      champions_league_slots: 4
+      tiebreaker: head_to_head

@@ -19,9 +19,16 @@ RECORDED: dict[tuple[str, str], str] = {
 
 RECORDED_SEASONS = ("2014-15", "2024-25")
 
+#: Deliberately broken copy of an EPL file: negative goals, a duplicated fixture, a 1.00 price.
+CORRUPT = "E0_corrupt.csv"
+
 
 def recorded_bytes(competition: str, season: str) -> bytes:
     return (FIXTURES / RECORDED[(competition, season)]).read_bytes()
+
+
+def corrupt_bytes() -> bytes:
+    return (FIXTURES / CORRUPT).read_bytes()
 
 
 def fixture_transport() -> httpx.MockTransport:

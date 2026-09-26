@@ -27,6 +27,16 @@ def test_ingest_is_no_longer_a_stub() -> None:
     assert "--seasons" in result.output
 
 
+def test_process_is_no_longer_a_stub() -> None:
+    assert "process" not in PLANNED_COMMANDS
+
+    result = runner.invoke(app, ["process", "--help"])
+
+    assert result.exit_code == 0
+    assert "--competition" in result.output
+    assert "--seasons" in result.output
+
+
 def test_ingest_rejects_an_unknown_source() -> None:
     result = runner.invoke(app, ["ingest", "--source", "api_football"])
 

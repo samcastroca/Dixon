@@ -2,7 +2,7 @@
 
 Full specification: `docs/SPEC.pdf`. Read the sections a task touches before writing code.
 
-**Current phase: 1 (ingestion) — complete.** Next up is phase 2 (processing & validation).
+**Current phase: 2 (processing & validation) — complete.** Next up is phase 3 (point-in-time features).
 
 ## Non-negotiable rules
 
@@ -80,6 +80,7 @@ data/raw/                 # gitignored local cache
 | `make test`     | `pytest`                                                    |
 | `make fmt`      | Apply ruff fixes and formatting                             |
 | `make ingest`   | `make ingest COMPETITIONS=EPL,LALIGA SEASONS=2014-2025`     |
+| `make process`  | Clean and validate the staged rows into the clean tables   |
 | `make migrate`  | `alembic upgrade head`                                      |
 | `make revision` | `make revision M="add matches"`                             |
 | `make build`    | Build the images without starting them                      |
@@ -100,4 +101,7 @@ data/raw/                 # gitignored local cache
 - Ingestion runs **inside the container** (`make ingest`): the compose services use public DNS
   because some ISP resolvers refuse `football-data.co.uk`.
 - `raw_payloads` is append-only: a changed payload is a new row with a new checksum, and the
-  previous one stays. Staging rows hang off their payload (`raw_payload_id`).
+  previous one stays. Staging rows hang off their payload (`raw_payload_id`); processing reads the
+  most recent payload of each season.
+- Team names are resolved through `config/team_aliases.yaml` (canonical name -> spellings, per
+  competition); an unknown spelling raises `UnknownTeamError` instead of being guessed.

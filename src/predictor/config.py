@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
+from datetime import time
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal
@@ -38,6 +39,11 @@ def settings_file_path() -> Path:
         if candidate.is_file():
             return candidate
     return REPO_ROOT / "config" / "settings.yaml"
+
+
+def team_aliases_file_path() -> Path:
+    """The alias seed file (spec section 6.2) always sits next to the settings file."""
+    return settings_file_path().parent / "team_aliases.yaml"
 
 
 class CompetitionRules(BaseModel):
@@ -71,6 +77,8 @@ class Competition(BaseModel):
     #: source name -> that source's code for this competition, e.g. {"football_data_uk": "E0"}
     sources: Annotated[Mapping[str, str], Field(min_length=1)]
     rules: CompetitionRules
+    #: Local kickoff time assumed when a source has no time column; falls back to `processing`.
+    default_kickoff_local_time: time | None = None
 
     @field_validator("timezone")
     @classmethod
@@ -125,6 +133,80 @@ class IngestionSettings(BaseModel):
     default_seasons: str = "2014-2025"
 
 
+class GoalColumns(BaseModel):
+    """Score columns of one source."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    home: str
+    away: str
+    ht_home: str
+    ht_away: str
+    result: str
+
+
+class StatColumns(BaseModel):
+    """Per-match team statistics: each entry is the (home column, away column) pair."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    shots: tuple[str, str]
+    shots_on_target: tuple[str, str]
+    corners: tuple[str, str]
+    fouls: tuple[str, str]
+    yellows: tuple[str, str]
+    reds: tuple[str, str]
+
+
+class BookmakerColumns(BaseModel):
+    """One bookmaker: the column prefix of its opening prices and, if any, of its closing ones."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    code: Annotated[str, Field(min_length=1, max_length=16)]
+    name: Annotated[str, Field(min_length=2)]
+    open: Annotated[str, Field(min_length=1)]
+    closing: str | None = None
+
+
+class SourceColumns(BaseModel):
+    """How one source names the fields the cleaning step needs (spec section 6.2)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    date: str
+    time: str
+    home: str
+    away: str
+    goals: GoalColumns
+    stats: StatColumns
+    bookmakers: Annotated[tuple[BookmakerColumns, ...], Field(min_length=1)]
+
+    #: Suffixes appended to a bookmaker prefix for the home, draw and away prices.
+    outcome_suffixes: tuple[str, str, str] = ("H", "D", "A")
+
+
+class ProcessingSettings(BaseModel):
+    """Phase 2 knobs: which source is cleaned and how its columns are read."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    source: str = "football_data_uk"
+    market: str = "1X2"
+    default_kickoff_local_time: time = time(15, 0)
+    status_when_result_missing: Literal["postponed", "abandoned", "awarded"] = "postponed"
+    columns: Mapping[str, SourceColumns] = {}
+
+    def source_columns(self, name: str) -> SourceColumns:
+        """Look up a source's column map, failing loudly on an unconfigured one."""
+        try:
+            return self.columns[name]
+        except KeyError as exc:
+            configured = ", ".join(sorted(self.columns)) or "none"
+            msg = f"no column map for source {name!r}; configured: {configured}"
+            raise KeyError(msg) from exc
+
+
 class AppSettings(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -174,6 +256,7 @@ class Settings(BaseSettings):
     mlflow: MlflowSettings = MlflowSettings()
     api: ApiSettings = ApiSettings()
     ingestion: IngestionSettings = IngestionSettings()
+    processing: ProcessingSettings = ProcessingSettings()
     sources: Mapping[str, SourceSettings] = {}
     competitions: Annotated[tuple[Competition, ...], Field(min_length=1)]
 

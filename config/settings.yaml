@@ -46,6 +46,38 @@ ingestion:
   default_source: football_data_uk
   default_seasons: 2014-2025
 
+# Phase 2: how staging rows become clean tables. Column names are configuration because they
+# belong to the source's file layout, not to the pipeline.
+processing:
+  source: football_data_uk
+  market: "1X2"
+  # Used when a season file carries no kickoff time; the row is flagged kickoff_time_estimated.
+  default_kickoff_local_time: "15:00"
+  # A row without a full-time result is not "played"; this source cannot tell us which of the
+  # other outcomes happened, so it gets one explicit status.
+  status_when_result_missing: postponed
+  columns:
+    football_data_uk:
+      date: Date
+      time: Time
+      home: HomeTeam
+      away: AwayTeam
+      goals: {home: FTHG, away: FTAG, ht_home: HTHG, ht_away: HTAG, result: FTR}
+      stats:
+        shots: [HS, AS]
+        shots_on_target: [HST, AST]
+        corners: [HC, AC]
+        fouls: [HF, AF]
+        yellows: [HY, AY]
+        reds: [HR, AR]
+      # `open` is the prefix of the opening 1X2 prices, `closing` of the closing ones (absent in
+      # the older seasons, where only Pinnacle published them).
+      bookmakers:
+        - {code: B365, name: Bet365, open: B365, closing: B365C}
+        - {code: BW, name: Bwin, open: BW, closing: BWC}
+        - {code: PS, name: Pinnacle, open: PS, closing: PSC}
+        - {code: WH, name: William Hill, open: WH, closing: WHC}
+
 # Competitions are data, not code. Adding a league must never require touching logic.
 competitions:
   - code: EPL
@@ -55,6 +87,7 @@ competitions:
     timezone: Europe/London
     sources:
       football_data_uk: E0
+    default_kickoff_local_time: "15:00"
     rules:
       teams: 20
       relegation_slots: 3
@@ -68,6 +101,7 @@ competitions:
     timezone: Europe/Madrid
     sources:
       football_data_uk: SP1
+    default_kickoff_local_time: "21:00"
     rules:
       teams: 20
       relegation_slots: 3

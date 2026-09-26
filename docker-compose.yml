@@ -80,12 +80,11 @@ services:
     <<: *app
     command: ["predictor", "ingest"]
 
-  # --- stubs for later phases -------------------------------------------------
   pipeline:
     <<: *app
-    profiles: ["later"]
     command: ["predictor", "process"]
 
+  # --- stubs for later phases -------------------------------------------------
   train:
     <<: *app
     profiles: ["later"]

@@ -6,11 +6,12 @@ from typing import Annotated
 
 import typer
 
-from predictor.config import get_settings
+from predictor.config import Competition, Settings, get_settings
 from predictor.ingestion.football_data_uk import FootballDataUkSource
 from predictor.ingestion.seasons import parse_seasons
 from predictor.ingestion.service import ingest as run_ingest
 from predictor.logging import bind_run_id, configure_logging, get_logger
+from predictor.processing.service import process as run_process
 
 app = typer.Typer(help="Sports results prediction platform", no_args_is_help=True)
 config_app = typer.Typer(help="Inspect the loaded configuration", no_args_is_help=True)
@@ -20,12 +21,21 @@ logger = get_logger(__name__)
 
 #: command name -> the phase (spec section 11) that implements it
 PLANNED_COMMANDS: dict[str, int] = {
-    "process": 2,
     "features": 3,
     "backtest": 4,
     "train": 6,
     "predict": 7,
 }
+
+
+def _selected_competitions(settings: Settings, competition: str | None) -> list[Competition]:
+    """Resolve a comma-separated list of codes, defaulting to every configured competition."""
+    codes = (
+        [code.strip().upper() for code in competition.split(",") if code.strip()]
+        if competition
+        else list(settings.competition_codes)
+    )
+    return [settings.competition(code) for code in codes]
 
 
 def _not_yet(command: str) -> None:
@@ -60,12 +70,7 @@ def ingest(
         typer.echo(f"unknown source {source_name!r}; only football_data_uk exists", err=True)
         raise typer.Exit(code=2)
 
-    codes = (
-        [code.strip().upper() for code in competition.split(",") if code.strip()]
-        if competition
-        else list(settings.competition_codes)
-    )
-    competitions = [settings.competition(code) for code in codes]
+    competitions = _selected_competitions(settings, competition)
     season_labels = parse_seasons(seasons or settings.ingestion.default_seasons)
 
     fetcher = FootballDataUkSource(settings)
@@ -87,9 +92,34 @@ def ingest(
 
 
 @app.command()
-def process() -> None:
-    """Clean and validate raw data (phase 2)."""
-    _not_yet("process")
+def process(
+    competition: Annotated[
+        str | None, typer.Option(help="Comma-separated competition codes; default: all")
+    ] = None,
+    seasons: Annotated[
+        str | None,
+        typer.Option(help="Range like 2014-2025, or a list; default: every staged season"),
+    ] = None,
+) -> None:
+    """Clean and validate the staged rows into the matches, stats and odds tables."""
+    settings = get_settings()
+    competitions = _selected_competitions(settings, competition)
+    season_labels = parse_seasons(seasons) if seasons else None
+
+    report = run_process(competitions, season_labels)
+
+    typer.echo(f"{'COMPETITION':<12}{'SEASON':<10}{'MATCHES':>8}{'STATS':>8}{'ODDS':>8}")
+    for entry in report.entries:
+        typer.echo(
+            f"{entry.competition:<12}{entry.season:<10}{entry.matches:>8}"
+            f"{entry.match_stats:>8}{entry.odds:>8}"
+        )
+    typer.echo(
+        f"{len(report.entries)} seasons, {report.matches} matches, "
+        f"{report.match_stats} stat rows, {report.odds} odds rows"
+    )
+    for code, names in report.teams.items():
+        typer.echo(f"\n{code} ({len(names)} canonical teams): {', '.join(names)}")
 
 
 @app.command()

@@ -16,6 +16,8 @@ def configure_logging(level: str | None = None) -> None:
     """Configure structlog to emit one JSON object per line on stdout."""
     resolved = (level or get_settings().app.log_level).upper()
     logging.basicConfig(format="%(message)s", stream=sys.stdout, level=resolved, force=True)
+    # httpx logs every request at INFO; our own `source.fetched` event already says it.
+    logging.getLogger("httpx").setLevel(max(logging.WARNING, logging.getLevelName(resolved)))
     structlog.configure(
         processors=[
             structlog.contextvars.merge_contextvars,
@@ -26,8 +28,10 @@ def configure_logging(level: str | None = None) -> None:
             structlog.processors.JSONRenderer(),
         ],
         wrapper_class=structlog.make_filtering_bound_logger(logging.getLevelName(resolved)),
-        logger_factory=structlog.PrintLoggerFactory(file=sys.stdout),
-        cache_logger_on_first_use=True,
+        logger_factory=structlog.PrintLoggerFactory(),
+        # Resolving the stream per call keeps a reconfigured or redirected stdout honest
+        # (a cached logger would keep writing to whatever stdout was at the first call).
+        cache_logger_on_first_use=False,
     )
 
 

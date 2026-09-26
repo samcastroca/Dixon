@@ -6,6 +6,7 @@ from logging.config import fileConfig
 
 from alembic import context
 
+from predictor import tables as _tables  # noqa: F401  (registers the tables on Base)
 from predictor.db import Base, build_url, get_engine
 
 config = context.config

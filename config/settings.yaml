@@ -25,6 +25,27 @@ api:
   host: 0.0.0.0
   port: 8000
 
+# One block per data source (spec section 4). Everything the HTTP client needs is here.
+sources:
+  football_data_uk:
+    base_url: https://football-data.co.uk/mmz4281
+    # Built with the competition's source code and the four-digit season code.
+    resource_template: "{season_code}/{source_code}.csv"
+    user_agent: predictor/0.1 (research project)
+    timeout_seconds: 30
+    max_attempts: 4
+    backoff_initial_seconds: 1.0
+    backoff_max_seconds: 30.0
+    backoff_jitter_seconds: 0.5
+    # Politeness: at most one request per this many seconds.
+    min_interval_seconds: 1.0
+    # The site mixes encodings across seasons; tried in order.
+    encodings: [utf-8-sig, cp1252]
+
+ingestion:
+  default_source: football_data_uk
+  default_seasons: 2014-2025
+
 # Competitions are data, not code. Adding a league must never require touching logic.
 competitions:
   - code: EPL

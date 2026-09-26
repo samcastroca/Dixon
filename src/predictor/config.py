@@ -94,6 +94,37 @@ class Competition(BaseModel):
         return ZoneInfo(self.timezone)
 
 
+class SourceSettings(BaseModel):
+    """Everything the HTTP layer of one source needs (spec section 6.1)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    base_url: str
+    resource_template: str
+    user_agent: str
+    timeout_seconds: Annotated[float, Field(gt=0)]
+    max_attempts: Annotated[int, Field(ge=1, le=10)]
+    backoff_initial_seconds: Annotated[float, Field(gt=0)]
+    backoff_max_seconds: Annotated[float, Field(gt=0)]
+    backoff_jitter_seconds: Annotated[float, Field(ge=0)]
+    min_interval_seconds: Annotated[float, Field(ge=0)]
+    encodings: Annotated[tuple[str, ...], Field(min_length=1)]
+
+    @model_validator(mode="after")
+    def _backoff_is_bounded(self) -> SourceSettings:
+        if self.backoff_max_seconds < self.backoff_initial_seconds:
+            msg = "backoff_max_seconds cannot be smaller than backoff_initial_seconds"
+            raise ValueError(msg)
+        return self
+
+
+class IngestionSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    default_source: str = "football_data_uk"
+    default_seasons: str = "2014-2025"
+
+
 class AppSettings(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -142,6 +173,8 @@ class Settings(BaseSettings):
     database: DatabaseSettings = DatabaseSettings()
     mlflow: MlflowSettings = MlflowSettings()
     api: ApiSettings = ApiSettings()
+    ingestion: IngestionSettings = IngestionSettings()
+    sources: Mapping[str, SourceSettings] = {}
     competitions: Annotated[tuple[Competition, ...], Field(min_length=1)]
 
     @field_validator("competitions")
@@ -165,6 +198,15 @@ class Settings(BaseSettings):
                 return competition
         msg = f"unknown competition {code!r}; configured: {', '.join(self.competition_codes)}"
         raise KeyError(msg)
+
+    def source(self, name: str) -> SourceSettings:
+        """Look up a source's configuration, failing loudly on an unconfigured one."""
+        try:
+            return self.sources[name]
+        except KeyError as exc:
+            configured = ", ".join(sorted(self.sources)) or "none"
+            msg = f"unknown source {name!r}; configured: {configured}"
+            raise KeyError(msg) from exc
 
     @classmethod
     def settings_customise_sources(

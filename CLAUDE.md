@@ -2,7 +2,7 @@
 
 Full specification: `docs/SPEC.pdf`. Read the sections a task touches before writing code.
 
-**Current phase: 0 (foundations) — complete.** Next up is phase 1 (ingestion).
+**Current phase: 1 (ingestion) — complete.** Next up is phase 2 (processing & validation).
 
 ## Non-negotiable rules
 
@@ -54,10 +54,12 @@ so more leagues and more sports need config, not new branches in logic. Team-str
 ```
 CLAUDE.md  docker-compose.yml  Dockerfile  Makefile  pyproject.toml  uv.lock  .env.example
 alembic/                  # migrations (baseline 0001_baseline is empty)
-config/settings.yaml      # competitions, database, mlflow, api — every tunable
+config/settings.yaml      # competitions, sources, database, mlflow, api — every tunable
 docker/                   # mlflow image, postgres init scripts
 src/predictor/
-  config.py  db.py  logging.py  cli.py
+  config.py  db.py  logging.py  cli.py  tables.py   # tables.py: ORM tables (NOT models/)
+  ingestion/              # base.py (Source), http.py, seasons.py, football_data_uk.py,
+                          # staging.py, repository.py, service.py
   api/                    # main.py (GET /health), routers/, schemas.py
   ingestion/ processing/ features/ models/ evaluation/ simulation/ dashboard/
 tests/
@@ -77,6 +79,7 @@ data/raw/                 # gitignored local cache
 | `make types`    | `mypy` (strict)                                             |
 | `make test`     | `pytest`                                                    |
 | `make fmt`      | Apply ruff fixes and formatting                             |
+| `make ingest`   | `make ingest COMPETITIONS=EPL,LALIGA SEASONS=2014-2025`     |
 | `make migrate`  | `alembic upgrade head`                                      |
 | `make revision` | `make revision M="add matches"`                             |
 | `make build`    | Build the images without starting them                      |
@@ -92,3 +95,9 @@ data/raw/                 # gitignored local cache
   is reachable; `make up` before `make check` runs them for real.
 - Tests live next to their kind: `tests/unit`, `tests/integration`, `tests/e2e`.
 - The `later` compose profile holds services whose phase has not arrived yet.
+- Database tables live in `src/predictor/tables.py`; `src/predictor/models/` is reserved by the
+  spec for the `MatchModel` implementations.
+- Ingestion runs **inside the container** (`make ingest`): the compose services use public DNS
+  because some ISP resolvers refuse `football-data.co.uk`.
+- `raw_payloads` is append-only: a changed payload is a new row with a new checksum, and the
+  previous one stays. Staging rows hang off their payload (`raw_payload_id`).

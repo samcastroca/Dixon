@@ -1,4 +1,4 @@
-.PHONY: help up down logs check test lint types migrate revision fmt build e2e
+.PHONY: help up down logs check test lint types migrate revision fmt build ingest
 
 UV ?= uv
 COMPOSE ?= docker compose
@@ -36,6 +36,12 @@ check: lint types test  ## Everything CI runs: ruff + mypy + pytest
 fmt:  ## Apply ruff formatting and safe fixes
 	$(UV) run ruff check --fix .
 	$(UV) run ruff format .
+
+COMPETITIONS ?= EPL,LALIGA
+SEASONS ?= 2014-2025
+
+ingest:  ## Fetch season files: make ingest COMPETITIONS=EPL,LALIGA SEASONS=2014-2025
+	$(COMPOSE) run --rm --build ingest predictor ingest 		--source football_data_uk --competition $(COMPETITIONS) --seasons $(SEASONS)
 
 migrate:  ## Apply the migrations (alembic upgrade head)
 	$(UV) run alembic upgrade head

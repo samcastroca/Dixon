@@ -13,6 +13,8 @@ x-app: &app
   depends_on:
     db:
       condition: service_healthy
+  # Some ISP resolvers refuse football-data.co.uk; ask public resolvers instead.
+  dns: [1.1.1.1, 8.8.8.8]
   networks: [predictor]
 
 services:
@@ -74,12 +76,11 @@ services:
       retries: 10
       start_period: 10s
 
-  # --- stubs for later phases -------------------------------------------------
   ingest:
     <<: *app
-    profiles: ["later"]
     command: ["predictor", "ingest"]
 
+  # --- stubs for later phases -------------------------------------------------
   pipeline:
     <<: *app
     profiles: ["later"]

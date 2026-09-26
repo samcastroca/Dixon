@@ -18,6 +18,22 @@ def test_pipeline_commands_are_stubs(command: str, phase: int) -> None:
     assert f"phase {phase}" in result.output
 
 
+def test_ingest_is_no_longer_a_stub() -> None:
+    assert "ingest" not in PLANNED_COMMANDS
+
+    result = runner.invoke(app, ["ingest", "--help"])
+
+    assert result.exit_code == 0
+    assert "--seasons" in result.output
+
+
+def test_ingest_rejects_an_unknown_source() -> None:
+    result = runner.invoke(app, ["ingest", "--source", "api_football"])
+
+    assert result.exit_code == 2
+    assert "unknown source" in result.output
+
+
 def test_config_show_lists_both_competitions() -> None:
     result = runner.invoke(app, ["config", "show"])
 

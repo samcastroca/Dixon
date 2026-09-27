@@ -14,9 +14,11 @@ dependencies = [
     "pandas>=3.0.6",
     "pandera>=0.33.1",
     "psycopg[binary]>=3.2",
+    "pymc[nutpie]>=6.3",
     "pydantic>=2.11",
     "pydantic-settings>=2.10",
     "pyyaml>=6.0",
+    "scipy>=1.14",
     "sqlalchemy>=2.0",
     "structlog>=25.4",
     "tenacity>=9.1",
@@ -78,6 +80,11 @@ plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
 module = "alembic.*"
+ignore_missing_imports = true
+
+# The statistical stack of phase 5 ships no type information.
+[[tool.mypy.overrides]]
+module = ["scipy.*", "pymc.*", "pytensor.*", "arviz.*", "nutpie.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

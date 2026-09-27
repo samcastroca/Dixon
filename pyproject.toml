@@ -82,6 +82,7 @@ testpaths = ["tests"]
 addopts = "-ra --strict-markers"
 markers = [
     "integration: needs a live PostgreSQL (docker compose up -d db)",
+    "slow: takes minutes rather than seconds (full-history rebuilds)",
 ]
 
 [tool.coverage.run]

@@ -239,3 +239,30 @@ class Odds(Base):
     p_home_shin: Mapped[float | None] = mapped_column(Float, nullable=True)
     p_draw_shin: Mapped[float | None] = mapped_column(Float, nullable=True)
     p_away_shin: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
+class Feature(Base):
+    """One point-in-time feature row per match and feature version (spec section 5).
+
+    The values live in a single JSONB document so that adding features in a later phase is a
+    new `feature_version`, not a migration. `as_of_utc < kickoff_utc` spans two tables, so it
+    cannot be a CHECK here: the builder guarantees it, the pandera schema checks it on the way
+    in and an integration test asserts it against the stored rows.
+
+    The column is `feature_values` and not `values` because VALUES is a reserved keyword in
+    PostgreSQL and would need quoting in every hand-written query.
+    """
+
+    __tablename__ = "features"
+    __table_args__ = (Index("ix_features_version", "feature_version", "as_of_utc"),)
+
+    match_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("matches.id", ondelete="CASCADE"), primary_key=True
+    )
+    feature_version: Mapped[str] = mapped_column(String(16), primary_key=True)
+    as_of_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    computed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    definition_checksum: Mapped[str] = mapped_column(String(64))
+    feature_values: Mapped[dict[str, Any]] = mapped_column(JSONB)

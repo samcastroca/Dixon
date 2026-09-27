@@ -207,6 +207,115 @@ class ProcessingSettings(BaseModel):
             raise KeyError(msg) from exc
 
 
+class EloParameters(BaseModel):
+    """Everything the Elo rating needs, per competition (spec section 7.1)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    k: Annotated[float, Field(gt=0)] = 20.0
+    home_advantage: float = 60.0
+    initial_rating: Annotated[float, Field(gt=0)] = 1500.0
+    #: G in R' = R + K*G*(S - E): 1.0 up to a one-goal margin, then this curve.
+    two_goal_multiplier: Annotated[float, Field(gt=0)] = 1.5
+    large_margin_base: Annotated[float, Field(gt=0)] = 11.0
+    large_margin_divisor: Annotated[float, Field(gt=0)] = 8.0
+    #: Share of the gap to the target given back at every season start.
+    season_regression: Annotated[float, Field(ge=0, le=1)] = 0.25
+    season_regression_target: Annotated[float, Field(gt=0)] = 1500.0
+
+
+class EloSettings(BaseModel):
+    """Elo defaults plus per-competition overrides, so a new league needs no new values."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    defaults: EloParameters = EloParameters()
+    #: Competition code -> the subset of knobs that competition overrides.
+    per_competition: Mapping[str, Mapping[str, float]] = {}
+
+    @model_validator(mode="after")
+    def _overrides_are_valid(self) -> EloSettings:
+        # Merge every override now, so a typo in the YAML fails at startup and not mid-build.
+        for code in self.per_competition:
+            self.for_competition(code)
+        return self
+
+    def for_competition(self, code: str) -> EloParameters:
+        """Defaults with that competition's overrides applied on top."""
+        override = self.per_competition.get(code.upper(), {})
+        return EloParameters(**{**self.defaults.model_dump(), **override})
+
+
+class FormSettings(BaseModel):
+    """Rolling and exponentially weighted form windows."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    windows: Annotated[tuple[int, ...], Field(min_length=1)] = (5, 10)
+    ewma_halflife: Annotated[float, Field(gt=0)] = 5.0
+
+    @field_validator("windows")
+    @classmethod
+    def _windows_are_distinct_and_positive(cls, value: tuple[int, ...]) -> tuple[int, ...]:
+        if any(window < 1 for window in value):
+            msg = "every form window must cover at least one match"
+            raise ValueError(msg)
+        if len(set(value)) != len(value):
+            msg = f"duplicate form windows: {value}"
+            raise ValueError(msg)
+        return value
+
+
+class ScheduleSettings(BaseModel):
+    """Schedule congestion knobs."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    congestion_window_days: Annotated[int, Field(ge=1)] = 14
+
+
+class MarketFeatureSettings(BaseModel):
+    """The optional pre-match market group. Off by default (spec section 6.3)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    bookmaker: Annotated[str, Field(min_length=1, max_length=16)] = "PS"
+    method: Literal["shin", "proportional"] = "shin"
+    prefer_closing: bool = True
+    #: A quote without a capture time cannot be proven pre-kickoff; using it is a choice.
+    allow_missing_captured_at: bool = False
+
+
+class FeatureGroups(BaseModel):
+    """Which feature groups a build assembles."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    elo: bool = True
+    form: bool = True
+    schedule: bool = True
+    market: bool = False
+
+
+class FeaturesSettings(BaseModel):
+    """Phase 3 knobs: every number a point-in-time feature depends on."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    version: Annotated[
+        str, Field(min_length=1, max_length=16, pattern=r"^[a-z0-9][a-z0-9._-]*$")
+    ] = "v1"
+    #: How long before kickoff a row is valid, which is what keeps as_of_utc < kickoff_utc.
+    as_of_offset_seconds: Annotated[int, Field(ge=1)] = 1
+    #: Decimals every stored value is rounded to, so two C libraries agree bit for bit.
+    value_decimals: Annotated[int, Field(ge=3, le=15)] = 9
+    groups: FeatureGroups = FeatureGroups()
+    elo: EloSettings = EloSettings()
+    form: FormSettings = FormSettings()
+    schedule: ScheduleSettings = ScheduleSettings()
+    market: MarketFeatureSettings = MarketFeatureSettings()
+
+
 class AppSettings(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -257,6 +366,7 @@ class Settings(BaseSettings):
     api: ApiSettings = ApiSettings()
     ingestion: IngestionSettings = IngestionSettings()
     processing: ProcessingSettings = ProcessingSettings()
+    features: FeaturesSettings = FeaturesSettings()
     sources: Mapping[str, SourceSettings] = {}
     competitions: Annotated[tuple[Competition, ...], Field(min_length=1)]
 

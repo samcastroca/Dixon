@@ -2,7 +2,7 @@
 
 Full specification: `docs/SPEC.pdf`. Read the sections a task touches before writing code.
 
-**Current phase: 2 (processing & validation) — complete.** Next up is phase 3 (point-in-time features).
+**Current phase: 3 (point-in-time features) — complete.** Next up is phase 4 (backtesting & baselines).
 
 ## Non-negotiable rules
 
@@ -81,6 +81,7 @@ data/raw/                 # gitignored local cache
 | `make fmt`      | Apply ruff fixes and formatting                             |
 | `make ingest`   | `make ingest COMPETITIONS=EPL,LALIGA SEASONS=2014-2025`     |
 | `make process`  | Clean and validate the staged rows into the clean tables   |
+| `make features` | Build the feature store: `make features VERSION=v1`         |
 | `make migrate`  | `alembic upgrade head`                                      |
 | `make revision` | `make revision M="add matches"`                             |
 | `make build`    | Build the images without starting them                      |
@@ -103,5 +104,15 @@ data/raw/                 # gitignored local cache
 - `raw_payloads` is append-only: a changed payload is a new row with a new checksum, and the
   previous one stays. Staging rows hang off their payload (`raw_payload_id`); processing reads the
   most recent payload of each season.
+- **Historical data reaches a feature only through the guarded `HistoryView`** (`features/replay.py`),
+  which raises `LeakageError` for anything timestamped at or after its cut-off. Matches
+  sharing a `kickoff_utc` are replayed as one batch, so they cannot see each other's
+  results; in the seasons whose source files carry no kickoff time that is most of them.
+- A feature row is `(match_id, feature_version)` with the values in one JSONB document, so
+  a new feature set is a new `feature_version`, never a migration. `definition_checksum`
+  records what that version actually computed.
+- The market feature group is **off**: this source publishes no `captured_at`, so a quote
+  cannot be proven pre-kickoff. Turning it on needs
+  `features.market.allow_missing_captured_at`.
 - Team names are resolved through `config/team_aliases.yaml` (canonical name -> spellings, per
   competition); an unknown spelling raises `UnknownTeamError` instead of being guessed.

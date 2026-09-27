@@ -7,6 +7,7 @@ from typing import Annotated
 import typer
 
 from predictor.config import Competition, Settings, get_settings
+from predictor.features.service import build_features as run_features
 from predictor.ingestion.football_data_uk import FootballDataUkSource
 from predictor.ingestion.seasons import parse_seasons
 from predictor.ingestion.service import ingest as run_ingest
@@ -21,7 +22,6 @@ logger = get_logger(__name__)
 
 #: command name -> the phase (spec section 11) that implements it
 PLANNED_COMMANDS: dict[str, int] = {
-    "features": 3,
     "backtest": 4,
     "train": 6,
     "predict": 7,
@@ -122,10 +122,56 @@ def process(
         typer.echo(f"\n{code} ({len(names)} canonical teams): {', '.join(names)}")
 
 
+#: How many of the strongest and weakest ratings the demo output prints per competition.
+RATINGS_SHOWN = 5
+
+
 @app.command()
-def features() -> None:
-    """Build the point-in-time feature store (phase 3)."""
-    _not_yet("features")
+def features(
+    version: Annotated[
+        str | None, typer.Option(help="Feature version label; default: features.version")
+    ] = None,
+    competition: Annotated[
+        str | None, typer.Option(help="Comma-separated competition codes; default: all")
+    ] = None,
+    seasons: Annotated[
+        str | None,
+        typer.Option(help="Seasons to write; the replay always starts at the first one on record"),
+    ] = None,
+) -> None:
+    """Build the point-in-time feature store from the clean match tables."""
+    settings = get_settings()
+    competitions = _selected_competitions(settings, competition)
+    season_labels = parse_seasons(seasons) if seasons else None
+
+    report = run_features(competitions, version=version, seasons=season_labels)
+
+    typer.echo(f"version {report.version}  {report.feature_count} features per row")
+    typer.echo(f"definitions {report.definition_checksum}")
+    typer.echo("")
+    typer.echo(f"{'COMPETITION':<12}{'SEASONS':>8}{'MATCHES':>9}{'ROWS':>7}")
+    for entry in report.entries:
+        typer.echo(f"{entry.competition:<12}{entry.seasons:>8}{entry.matches:>9}{entry.rows:>7}")
+    typer.echo(f"{len(report.entries)} competitions, {report.rows} feature rows")
+
+    for code, ranking in report.ratings.items():
+        typer.echo("")
+        typer.echo(f"{code} Elo today: top and bottom {RATINGS_SHOWN} of {len(ranking)}")
+        for name, rating in ranking[:RATINGS_SHOWN]:
+            typer.echo(f"  {rating:8.1f}  {name}")
+        typer.echo("  ...")
+        for name, rating in ranking[-RATINGS_SHOWN:]:
+            typer.echo(f"  {rating:8.1f}  {name}")
+
+    for code, sample in report.samples.items():
+        typer.echo("")
+        typer.echo(
+            f"{code} sample: match {sample.match_id}, "
+            f"kickoff {sample.kickoff_utc.isoformat()}, "
+            f"as_of {sample.as_of_utc.isoformat()}"
+        )
+        for name, value in sample.values.items():
+            typer.echo(f"  {name:<40}{'-' if value is None else format(value, '.6g')}")
 
 
 @app.command()

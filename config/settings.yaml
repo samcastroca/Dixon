@@ -78,6 +78,50 @@ processing:
         - {code: PS, name: Pinnacle, open: PS, closing: PSC}
         - {code: WH, name: William Hill, open: WH, closing: WHC}
 
+# Phase 3: the point-in-time feature store. Every number a feature depends on lives here.
+features:
+  version: v1
+  # Each row is valid this long before kickoff, which is what keeps as_of_utc < kickoff_utc.
+  as_of_offset_seconds: 1
+  # Rounding every value keeps a rebuild identical across machines: pow() on glibc and on
+  # the Windows runtime disagree in the last bit, and 1e-9 is far finer than any model needs.
+  value_decimals: 9
+  groups:
+    elo: true
+    form: true
+    schedule: true
+    # Off: this source publishes no capture time, so a quote cannot be proven pre-kickoff.
+    market: false
+  elo:
+    defaults:
+      k: 20.0
+      home_advantage: 60.0
+      initial_rating: 1500.0
+      # G in R' = R + K*G*(S - E): 1.0 up to a one-goal margin, then this curve.
+      two_goal_multiplier: 1.5
+      large_margin_base: 11.0
+      large_margin_divisor: 8.0
+      # Every season start: R <- target + (1 - season_regression) * (R - target)
+      season_regression: 0.25
+      season_regression_target: 1500.0
+    # The same knobs per competition; anything absent inherits the defaults above.
+    per_competition:
+      EPL: {}
+      LALIGA: {}
+  form:
+    # Rolling means over the last N appearances, plus one exponentially weighted average.
+    windows: [5, 10]
+    ewma_halflife: 5.0
+  schedule:
+    congestion_window_days: 14
+  market:
+    # Which stored quote the group would use; Pinnacle closing prices cover every season.
+    bookmaker: PS
+    method: shin
+    prefer_closing: true
+    # Using a quote we cannot date has to be a decision, not an oversight.
+    allow_missing_captured_at: false
+
 # Competitions are data, not code. Adding a league must never require touching logic.
 competitions:
   - code: EPL

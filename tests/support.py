@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import httpx
+
+from predictor.features.replay import MarketQuote, MatchRecord, TeamStats
+from predictor.processing.clean import MatchStatus
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "football_data_uk"
 
@@ -75,3 +79,45 @@ class FakeClock:
 
     def advance(self, seconds: float) -> None:
         self.now += seconds
+
+
+# --- phase 3: hand-built records for the replay engine ------------------------
+
+
+def kickoff(day: int, hour: int = 15, minute: int = 0) -> datetime:
+    """A UTC kickoff `day - 1` days into the 2020-21 season, so tests can order matches."""
+    return datetime(2020, 8, 1, hour, minute, tzinfo=UTC) + timedelta(days=day - 1)
+
+
+def record(
+    match_id: int,
+    home_team_id: int,
+    away_team_id: int,
+    at: datetime,
+    home_goals: int | None = None,
+    away_goals: int | None = None,
+    *,
+    season_id: int = 1,
+    season_label: str = "2020-21",
+    competition_id: int = 1,
+    shots: tuple[int | None, int | None] = (10, 8),
+    shots_on_target: tuple[int | None, int | None] = (5, 3),
+    status: str = MatchStatus.PLAYED.value,
+    market: MarketQuote | None = None,
+) -> MatchRecord:
+    """One match as the replay engine sees it, with sane defaults for everything unused."""
+    return MatchRecord(
+        match_id=match_id,
+        competition_id=competition_id,
+        season_id=season_id,
+        season_label=season_label,
+        kickoff_utc=at,
+        home_team_id=home_team_id,
+        away_team_id=away_team_id,
+        home_goals=home_goals,
+        away_goals=away_goals,
+        status=status,
+        home_stats=TeamStats(shots=shots[0], shots_on_target=shots_on_target[0]),
+        away_stats=TeamStats(shots=shots[1], shots_on_target=shots_on_target[1]),
+        market=market,
+    )

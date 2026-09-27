@@ -1,4 +1,4 @@
-.PHONY: help up down logs check test lint types migrate revision fmt build ingest process
+.PHONY: help up down logs check test lint types migrate revision fmt build ingest process features
 
 UV ?= uv
 COMPOSE ?= docker compose
@@ -45,6 +45,11 @@ ingest:  ## Fetch season files: make ingest COMPETITIONS=EPL,LALIGA SEASONS=2014
 
 process:  ## Clean and validate the staged rows: make process COMPETITIONS=EPL,LALIGA
 	$(COMPOSE) run --rm --build pipeline predictor process --competition $(COMPETITIONS)
+
+VERSION ?= v1
+
+features:  ## Build the point-in-time feature store: make features VERSION=v1
+	$(COMPOSE) run --rm --build pipeline predictor features --version $(VERSION) --competition $(COMPETITIONS)
 
 migrate:  ## Apply the migrations (alembic upgrade head)
 	$(UV) run alembic upgrade head

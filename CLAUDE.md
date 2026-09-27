@@ -2,7 +2,7 @@
 
 Full specification: `docs/SPEC.pdf`. Read the sections a task touches before writing code.
 
-**Current phase: 3 (point-in-time features) — complete.** Next up is phase 4 (backtesting & baselines).
+**Current phase: 4 (backtesting & baselines) — complete.** Next up is phase 5 (statistical models M1-M4).
 
 ## Non-negotiable rules
 
@@ -82,6 +82,8 @@ data/raw/                 # gitignored local cache
 | `make ingest`   | `make ingest COMPETITIONS=EPL,LALIGA SEASONS=2014-2025`     |
 | `make process`  | Clean and validate the staged rows into the clean tables   |
 | `make features` | Build the feature store: `make features VERSION=v1`         |
+| `make backtest` | Walk-forward: `make backtest MODEL=baseline_market TEST_SEASONS=2019-2025` |
+| `make report`   | Write `reports/backtest.md` and `.html` from `backtest_results` |
 | `make migrate`  | `alembic upgrade head`                                      |
 | `make revision` | `make revision M="add matches"`                             |
 | `make build`    | Build the images without starting them                      |
@@ -114,5 +116,20 @@ data/raw/                 # gitignored local cache
 - The market feature group is **off**: this source publishes no `captured_at`, so a quote
   cannot be proven pre-kickoff. Turning it on needs
   `features.market.allow_missing_captured_at`.
+- **Every model implements `MatchModel`** (`models/base.py`) and is reached through
+  `models/registry.py`, which hands out *factories*: the walk-forward engine builds a fresh
+  model for every fit, so nothing learned in one fold survives into the next. Team-strength
+  models go in the registry behind `PerCompetition`. A model that needs more than the frames
+  it is given implements `HistoryAware` and receives the guarded `HistoryView` itself.
+- **The backtester never hands a model anything it read outside the guard**: training frames
+  come from `HistoryView.played()`, prediction frames from `MatchRecord.as_fixture()`.
+- **A matchweek is the min-count rule**: the source publishes no matchweek, so
+  `backtest.refit_every_matchweeks` counts "the team with the fewest matches played this
+  season has played N more". `0` means one fit per test season.
+- The market benchmark (M0b) is the one place undated quotes may be used, under its own
+  `backtest.market_baseline` block, and it is marked `deployable = False`. The feature
+  store's market group stays off.
+- `backtest_results` keeps every run; `make report` shows the newest run per model. Its
+  unique key is declared `NULLS NOT DISTINCT`, or the pooled rows would duplicate.
 - Team names are resolved through `config/team_aliases.yaml` (canonical name -> spellings, per
   competition); an unknown spelling raises `UnknownTeamError` instead of being guessed.

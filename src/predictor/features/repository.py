@@ -13,7 +13,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from predictor import tables
-from predictor.config import Competition, Settings, get_settings
+from predictor.config import Competition, MarketFeatureSettings, Settings, get_settings
 from predictor.features.builder import FeatureRow
 from predictor.features.replay import MarketQuote, MatchRecord, TeamStats
 
@@ -44,7 +44,9 @@ def load_records(
 
     stats = _team_statistics(session, identifier)
     market = (
-        _market_quotes(session, identifier, resolved) if resolved.features.groups.market else {}
+        market_quotes(session, identifier, resolved.features.market, resolved.processing.market)
+        if resolved.features.groups.market
+        else {}
     )
 
     rows = session.execute(
@@ -123,9 +125,14 @@ def _team_statistics(session: Session, identifier: int) -> dict[tuple[int, int],
     }
 
 
-def _market_quotes(session: Session, identifier: int, settings: Settings) -> dict[int, MarketQuote]:
-    """The configured bookmaker's de-margined 1X2 distribution, one quote per match."""
-    market = settings.features.market
+def market_quotes(
+    session: Session, identifier: int, market: MarketFeatureSettings, market_name: str
+) -> dict[int, MarketQuote]:
+    """One bookmaker's de-margined distribution per match, under the given market settings.
+
+    Phase 4's market benchmark reads the same quotes under its own settings block, which is
+    why the caller says which ones it wants instead of the function reaching into `features`.
+    """
     columns = (
         (tables.Odds.p_home_shin, tables.Odds.p_draw_shin, tables.Odds.p_away_shin)
         if market.method == "shin"
@@ -141,7 +148,7 @@ def _market_quotes(session: Session, identifier: int, settings: Settings) -> dic
         .where(
             tables.Match.competition_id == identifier,
             tables.Odds.bookmaker == market.bookmaker,
-            tables.Odds.market == settings.processing.market,
+            tables.Odds.market == market_name,
             tables.Odds.is_closing.is_(market.prefer_closing),
         )
     )

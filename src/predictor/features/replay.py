@@ -176,6 +176,15 @@ class HistoryView:
             raise ValueError(msg)
         return found.home_goals, found.away_goals
 
+    def played(self) -> tuple[MatchRecord, ...]:
+        """Every match with a result that kicked off before the cut-off, in kickoff order.
+
+        This is the training set of a backtest fold: a model is fitted on the whole past
+        rather than on one team's, and it still cannot reach past the cut-off.
+        """
+        records, kickoffs = self._index.played()
+        return tuple(records[: bisect_left(kickoffs, self._as_of)])
+
     def recent(
         self, team_id: int, scope: str = OVERALL, limit: int | None = None
     ) -> tuple[TeamAppearance, ...]:
@@ -225,6 +234,8 @@ class HistoryIndex:
         "_batches",
         "_by_id",
         "_participants",
+        "_played",
+        "_played_kickoffs",
         "_previous_season",
         "_scoped",
         "_season_kickoffs",
@@ -238,6 +249,8 @@ class HistoryIndex:
         self._participants: dict[int, tuple[list[tuple[datetime, int]], list[datetime]]] = {}
         self._previous_season: dict[int, int | None] = {}
         self._batches: list[tuple[datetime, tuple[MatchRecord, ...]]] = []
+        self._played: list[MatchRecord] = []
+        self._played_kickoffs: list[datetime] = []
 
         season_order: list[int] = []
         batch: list[MatchRecord] = []
@@ -250,6 +263,8 @@ class HistoryIndex:
                 batch = []
             batch.append(record)
             if record.played:
+                self._played.append(record)
+                self._played_kickoffs.append(record.kickoff_utc)
                 for appearance in record.appearances():
                     self._add(appearance)
         if batch:
@@ -297,6 +312,10 @@ class HistoryIndex:
 
     def previous_season(self, season_id: int) -> int | None:
         return self._previous_season.get(season_id)
+
+    def played(self) -> tuple[list[MatchRecord], list[datetime]]:
+        """Every match with a result, in kickoff order, with its kickoffs alongside."""
+        return self._played, self._played_kickoffs
 
     def view(self, as_of: datetime) -> HistoryView:
         return HistoryView(self, as_of)

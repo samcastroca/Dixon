@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import pytest
-from tests.support import kickoff, record
 
 from predictor.config import EloParameters
 from predictor.features.elo import EloRatings
 from predictor.features.replay import MatchRecord, ReplayEngine
+from tests.support import kickoff, record
 
 A, B, C, D, E = 1, 2, 3, 4, 5
 

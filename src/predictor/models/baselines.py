@@ -21,7 +21,10 @@ from predictor.models.base import ScoreMatrices, probability_frame
 #: What a model with nothing to go on says.
 UNIFORM: tuple[float, float, float] = (1.0 / OUTCOME_COUNT,) * 3
 
-_NO_SCORELINE = "this baseline has no scoreline distribution; those arrive with phase 5"
+_NO_SCORELINE = (
+    "a baseline has no scoreline distribution: it knows a frequency, not a goal rate. "
+    "The statistical models of phase 5 have one."
+)
 
 
 class FrequencyBaseline:
@@ -62,7 +65,10 @@ class FrequencyBaseline:
         return probability_frame(match_ids, [self._frequencies] * len(match_ids))
 
     def predict_scores(
-        self, fixtures: pd.DataFrame, features: pd.DataFrame | None = None, max_goals: int = 10
+        self,
+        fixtures: pd.DataFrame,
+        features: pd.DataFrame | None = None,
+        max_goals: int | None = None,
     ) -> ScoreMatrices:
         del fixtures, features, max_goals
         raise NotImplementedError(_NO_SCORELINE)
@@ -98,7 +104,10 @@ class MarketBaseline:
         return probability_frame(quoted["match_id"].astype(int).tolist(), values)
 
     def predict_scores(
-        self, fixtures: pd.DataFrame, features: pd.DataFrame | None = None, max_goals: int = 10
+        self,
+        fixtures: pd.DataFrame,
+        features: pd.DataFrame | None = None,
+        max_goals: int | None = None,
     ) -> ScoreMatrices:
         del fixtures, features, max_goals
         raise NotImplementedError(_NO_SCORELINE)

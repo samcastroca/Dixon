@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import pytest
-from tests.support import kickoff, record
 
 from predictor.features.replay import MatchRecord, ReplayEngine
 from predictor.features.schedule import ScheduleFeatures
+from tests.support import kickoff, record
 
 TEAM = 10
 MATCHES_PER_TEAM = 38

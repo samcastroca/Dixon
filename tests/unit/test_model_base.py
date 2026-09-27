@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pandas as pd
 import pytest
-from tests.support import kickoff, record
 
 from predictor.evaluation.frames import fixtures_frame, matches_frame
 from predictor.features.replay import HistoryIndex, HistoryView, MatchRecord
@@ -17,6 +16,7 @@ from predictor.models.base import (
     ScoreMatrices,
     probability_frame,
 )
+from tests.support import kickoff, record
 
 
 class Counting:
@@ -49,7 +49,10 @@ class Counting:
         )
 
     def predict_scores(
-        self, fixtures: pd.DataFrame, features: pd.DataFrame | None = None, max_goals: int = 10
+        self,
+        fixtures: pd.DataFrame,
+        features: pd.DataFrame | None = None,
+        max_goals: int | None = None,
     ) -> ScoreMatrices:
         raise NotImplementedError
 

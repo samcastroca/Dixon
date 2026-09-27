@@ -156,6 +156,49 @@ backtest:
     prefer_closing: true
     allow_missing_captured_at: true
 
+# Phase 5: the statistical models (spec section 7). Outside `features` for the same reason
+# `backtest` is: the feature store's definition checksum hashes that whole section.
+models:
+  # Where the scoreline matrix is truncated. The leftover mass is reported, never hidden.
+  # The spec names 10; measured, that leaves 3.8e-04 outside the grid for the highest-scoring
+  # fixture a fitted model produces (lambda 3.0 against 2.6), over the 1e-4 the acceptance
+  # test allows. 12 leaves 2.0e-05 there and costs nothing worth counting.
+  max_goals: 12
+  # M1: an ordered logistic regression over the phase 3 Elo ratings.
+  elo:
+    feature: elo_diff
+    rating_scale: 400.0
+    optimiser: {max_iter: 200, tolerance: 1.0e-8, ridge: 1.0e-6}
+  # M2: independent Poisson with attack, defence, home advantage and intercept.
+  poisson:
+    optimiser: {max_iter: 500, tolerance: 1.0e-8, ridge: 1.0e-6}
+    # A newcomer inherits the mean strength of the teams relegated at the end of the previous
+    # training season, which is the Poisson analogue of the phase 3 Elo rule.
+    promoted: relegated_mean
+  # M3: M2 plus the tau low-score correction and time-decay weights.
+  dixon_coles:
+    optimiser: {max_iter: 500, tolerance: 1.0e-8, ridge: 1.0e-6}
+    promoted: relegated_mean
+    rho_bounds: [-0.4, 0.4]
+    xi:
+      # w = exp(-xi * days / 365), so xi is per year and 0 means no decay.
+      grid: [0.0, 0.5, 1.0, 2.0, 4.0]
+      inner_seasons: 2
+      # Used when a fold's training history is too short for the inner walk-forward.
+      default: 1.0
+  # M4: PyMC hierarchical Poisson. nutpie compiles with numba, so no C compiler is needed.
+  bayesian:
+    draws: 1000
+    tune: 1000
+    chains: 4
+    target_accept: 0.9
+    seed: 20260926
+    nuts_sampler: nutpie
+    posterior_samples: 500
+    intercept_sigma: 1.0
+    home_sigma: 1.0
+    strength_sigma: 1.0
+
 # Competitions are data, not code. Adding a league must never require touching logic.
 competitions:
   - code: EPL

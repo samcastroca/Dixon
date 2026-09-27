@@ -5,12 +5,12 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pytest
-from tests.support import kickoff, record
 
 from predictor.config import MarketFeatureSettings, Settings, get_settings
 from predictor.features.builder import FeatureBuilder
 from predictor.features.replay import LeakageError, MarketQuote, MatchRecord
 from predictor.features.validate import FeatureValidationError, validate_features
+from tests.support import kickoff, record
 
 HISTORY = [
     record(1, 10, 20, kickoff(1), 2, 0),

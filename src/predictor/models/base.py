@@ -45,8 +45,10 @@ __all__ = [
     "PROBABILITY_COLUMNS",
     "HistoryAware",
     "MatchModel",
+    "Parameterised",
     "PerCompetition",
     "ScoreMatrices",
+    "fitted_parameters_of",
     "probability_frame",
     "validate_probabilities",
 ]
@@ -85,9 +87,16 @@ class MatchModel(Protocol):
         ...
 
     def predict_scores(
-        self, fixtures: pd.DataFrame, features: pd.DataFrame | None = None, max_goals: int = 10
+        self,
+        fixtures: pd.DataFrame,
+        features: pd.DataFrame | None = None,
+        max_goals: int | None = None,
     ) -> ScoreMatrices:
-        """The scoreline probability matrix per match, where the model has one."""
+        """The scoreline probability matrix per match, where the model has one.
+
+        `None` means the configured `models.max_goals`, so the truncation point stays a
+        setting rather than a number repeated in every implementation.
+        """
         ...
 
 
@@ -194,7 +203,10 @@ class PerCompetition[ModelT: MatchModel]:
         )
 
     def predict_scores(
-        self, fixtures: pd.DataFrame, features: pd.DataFrame | None = None, max_goals: int = 10
+        self,
+        fixtures: pd.DataFrame,
+        features: pd.DataFrame | None = None,
+        max_goals: int | None = None,
     ) -> ScoreMatrices:
         matrices: ScoreMatrices = {}
         for competition_id in sorted(fixtures["competition_id"].unique().tolist()):
@@ -229,3 +241,29 @@ def _features_for(features: pd.DataFrame | None, rows: pd.DataFrame) -> pd.DataF
     if features is None:
         return None
     return features[features["match_id"].isin(rows["match_id"])]
+
+
+@runtime_checkable
+class Parameterised(Protocol):
+    """A model that can say what it fitted, so the report can show it (spec section 11).
+
+    Optional on purpose: a baseline has nothing to report, and the engine must not care.
+    Every value is a float, because these end up in a JSONB document and in a table column.
+    """
+
+    def fitted_parameters(self) -> Mapping[str, float]:
+        """The fit in numbers: a home advantage, a rho, a chosen decay, a cutpoint."""
+        ...
+
+
+def fitted_parameters_of(model: object, competition_id: int) -> Mapping[str, float] | None:
+    """What a model fitted for one competition, or None when it has nothing to say.
+
+    A `PerCompetition` model holds one member per league, and a fold belongs to exactly one of
+    them, so this asks the right member rather than averaging parameters that describe
+    different leagues.
+    """
+    if isinstance(model, PerCompetition):
+        member = model.members.get(competition_id)
+        return member.fitted_parameters() if isinstance(member, Parameterised) else None
+    return model.fitted_parameters() if isinstance(model, Parameterised) else None

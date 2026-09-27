@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 import pytest
-from tests.support import kickoff, record
 
 from predictor.features.replay import (
     HistoryIndex,
@@ -14,6 +13,7 @@ from predictor.features.replay import (
     MatchRecord,
     ReplayEngine,
 )
+from tests.support import kickoff, record
 
 
 def three_matches() -> list[MatchRecord]:

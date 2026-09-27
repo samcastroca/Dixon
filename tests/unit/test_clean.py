@@ -5,11 +5,11 @@ from __future__ import annotations
 from datetime import UTC, date, datetime, time
 
 import pytest
-from tests.support import recorded_bytes
 
 from predictor.config import Competition, Settings, get_settings
 from predictor.ingestion.staging import parse_rows
 from predictor.processing.clean import MatchStatus, RowCleaner, parse_kickoff
+from tests.support import recorded_bytes
 
 ENCODINGS = ("utf-8-sig", "cp1252")
 

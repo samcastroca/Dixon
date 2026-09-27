@@ -379,6 +379,117 @@ class BacktestSettings(BaseModel):
     market_baseline: MarketFeatureSettings = MarketFeatureSettings(allow_missing_captured_at=True)
 
 
+class OptimiserSettings(BaseModel):
+    """How far the maximum-likelihood fits of M1-M3 are allowed to go (spec section 7)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    max_iter: Annotated[int, Field(ge=10, le=10_000)] = 500
+    tolerance: Annotated[float, Field(gt=0, lt=1)] = 1e-8
+    #: A small L2 penalty. It never changes a well-determined fit, and it keeps a thin fold
+    #: (a team with two matches, a league with few draws) from running a parameter to infinity.
+    ridge: Annotated[float, Field(ge=0, lt=1)] = 1e-6
+
+
+class EloModelSettings(BaseModel):
+    """M1: the ordered logistic regression laid over the phase 3 Elo ratings."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    #: The feature the rating difference is read from; it must exist in the feature store.
+    feature: Annotated[str, Field(min_length=1)] = "elo_diff"
+    #: Ratings run in the hundreds, so the slope is tiny; dividing keeps the fit conditioned.
+    rating_scale: Annotated[float, Field(gt=0)] = 400.0
+    optimiser: OptimiserSettings = OptimiserSettings()
+
+
+#: How a team with no training history is given attack and defence (spec section 7.1).
+PromotedRule = Literal["relegated_mean", "league_average"]
+
+
+class PoissonModelSettings(BaseModel):
+    """M2: the independent Poisson goal model."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    optimiser: OptimiserSettings = OptimiserSettings()
+    #: `relegated_mean` gives a newcomer the mean strength of the teams that went down at the
+    #: end of the previous training season, mirroring the Elo rule of phase 3. `league_average`
+    #: gives it zero, which the sum-to-zero constraint makes the average team.
+    promoted: PromotedRule = "relegated_mean"
+
+
+class TimeDecaySettings(BaseModel):
+    """M3: the time-decay half-life search, tuned per league on training seasons only."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    #: Candidate xi in `w = exp(-xi * days / 365)`; 0 means no decay at all.
+    grid: Annotated[tuple[float, ...], Field(min_length=1)] = (0.0, 0.5, 1.0, 2.0, 4.0)
+    #: How many of the newest training seasons are held out as inner walk-forward folds.
+    inner_seasons: Annotated[int, Field(ge=1, le=10)] = 2
+    #: Used when the training history is too short for the inner folds.
+    default: Annotated[float, Field(ge=0)] = 1.0
+
+
+class DixonColesModelSettings(BaseModel):
+    """M3: M2 plus the low-score correction and the time decay."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    optimiser: OptimiserSettings = OptimiserSettings()
+    promoted: PromotedRule = "relegated_mean"
+    #: rho is bounded so tau stays positive on every one of the four corrected scorelines.
+    rho_bounds: tuple[float, float] = (-0.4, 0.4)
+    xi: TimeDecaySettings = TimeDecaySettings()
+
+    @model_validator(mode="after")
+    def _bounds_are_ordered(self) -> DixonColesModelSettings:
+        low, high = self.rho_bounds
+        if low >= high:
+            msg = f"rho_bounds must be increasing, got {self.rho_bounds}"
+            raise ValueError(msg)
+        return self
+
+
+class BayesianModelSettings(BaseModel):
+    """M4: the PyMC hierarchical Poisson sampler (spec section 7, M4)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    draws: Annotated[int, Field(ge=50, le=100_000)] = 1000
+    tune: Annotated[int, Field(ge=50, le=100_000)] = 1000
+    chains: Annotated[int, Field(ge=1, le=16)] = 4
+    target_accept: Annotated[float, Field(gt=0.5, lt=1.0)] = 0.9
+    #: Fixed, so the same data always gives the same posterior.
+    seed: int = 20260926
+    #: NUTS implementation. nutpie compiles with numba, which needs no C compiler.
+    nuts_sampler: Literal["nutpie", "pymc"] = "nutpie"
+    #: How many posterior draws are averaged into the predictive scoreline matrix.
+    posterior_samples: Annotated[int, Field(ge=50, le=100_000)] = 500
+    #: Prior scales, so the model's assumptions are configuration and not buried constants.
+    intercept_sigma: Annotated[float, Field(gt=0)] = 1.0
+    home_sigma: Annotated[float, Field(gt=0)] = 1.0
+    strength_sigma: Annotated[float, Field(gt=0)] = 1.0
+
+
+class ModelsSettings(BaseModel):
+    """Phase 5 knobs: the statistical models of spec section 7.
+
+    Like `backtest`, this lives outside `features` on purpose: the feature store's definition
+    checksum hashes that whole section, so a model knob in there would invalidate every row.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    #: Where the scoreline matrix is truncated. The residual mass is reported, never hidden.
+    max_goals: Annotated[int, Field(ge=3, le=30)] = 10
+    elo: EloModelSettings = EloModelSettings()
+    poisson: PoissonModelSettings = PoissonModelSettings()
+    dixon_coles: DixonColesModelSettings = DixonColesModelSettings()
+    bayesian: BayesianModelSettings = BayesianModelSettings()
+
+
 class AppSettings(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -431,6 +542,7 @@ class Settings(BaseSettings):
     processing: ProcessingSettings = ProcessingSettings()
     features: FeaturesSettings = FeaturesSettings()
     backtest: BacktestSettings = BacktestSettings()
+    models: ModelsSettings = ModelsSettings()
     sources: Mapping[str, SourceSettings] = {}
     competitions: Annotated[tuple[Competition, ...], Field(min_length=1)]
 

@@ -7,13 +7,13 @@ import re
 from datetime import UTC, datetime
 
 import pytest
-from tests.support import FakeClock, fixture_transport, recorded_bytes
 
 from predictor.config import get_settings
 from predictor.ingestion.base import ResourceNotFound
 from predictor.ingestion.football_data_uk import FootballDataUkSource
 from predictor.ingestion.http import HttpClient
 from predictor.ingestion.staging import parse_rows
+from tests.support import FakeClock, fixture_transport, recorded_bytes
 
 MATCHES_PER_SEASON = 380
 CORE_COLUMNS = ("Div", "Date", "HomeTeam", "AwayTeam", "FTHG", "FTAG", "FTR")

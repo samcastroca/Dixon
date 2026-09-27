@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from tests.support import kickoff, record
 
 from predictor.config import MarketFeatureSettings
 from predictor.evaluation.frames import fixtures_frame, matches_frame
 from predictor.features.replay import LeakageError, MarketQuote, MatchRecord
 from predictor.models.baselines import FrequencyBaseline, MarketBaseline
 from predictor.models.registry import MODEL_NAMES, build
+from tests.support import kickoff, record
 
 TOLERANCE = 1e-12
 
@@ -123,7 +123,9 @@ def test_neither_baseline_offers_a_scoreline_matrix() -> None:
 
 
 def test_both_baselines_are_registered_under_the_names_the_cli_takes() -> None:
-    assert set(MODEL_NAMES) == {"baseline_frequency", "baseline_market"}
+    # Which models exist beyond these two is `test_models_registry.py`'s business; this only
+    # cares that the two baselines are reachable under the names the CLI documents.
+    assert {"baseline_frequency", "baseline_market"} <= set(MODEL_NAMES)
     assert build("baseline_frequency").name == "baseline_frequency"
     assert build("baseline_market").name == "baseline_market"
 

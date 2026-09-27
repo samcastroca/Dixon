@@ -6,7 +6,6 @@ import csv
 import io
 
 import pytest
-from tests.support import RECORDED, recorded_bytes
 
 from predictor.processing.entities import (
     AliasFileError,
@@ -14,6 +13,7 @@ from predictor.processing.entities import (
     UnknownTeamError,
     normalise_key,
 )
+from tests.support import RECORDED, recorded_bytes
 
 
 @pytest.fixture(scope="module")

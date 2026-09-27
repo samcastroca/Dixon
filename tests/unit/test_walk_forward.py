@@ -7,12 +7,12 @@ from datetime import datetime
 
 import pandas as pd
 import pytest
-from tests.support import kickoff, record
 
 from predictor.config import BacktestSettings, Competition, Settings, get_settings
 from predictor.evaluation.backtest import CompetitionHistory, WalkForward
 from predictor.features.replay import HistoryView, LeakageError, MatchRecord
 from predictor.models.base import PROBABILITY_COLUMNS, MatchModel, ScoreMatrices
+from tests.support import kickoff, record
 
 #: Four teams and a double round-robin: six rounds of two matches, 12 matches a season.
 #: Every team plays exactly once per round, which is what makes the refit cadence countable.
@@ -105,7 +105,10 @@ class Uniform:
         )
 
     def predict_scores(
-        self, fixtures: pd.DataFrame, features: pd.DataFrame | None = None, max_goals: int = 10
+        self,
+        fixtures: pd.DataFrame,
+        features: pd.DataFrame | None = None,
+        max_goals: int | None = None,
     ) -> ScoreMatrices:
         raise NotImplementedError
 

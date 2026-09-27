@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import httpx
 import pytest
-from tests.support import FakeClock, scripted_transport
 
 from predictor.config import get_settings
 from predictor.ingestion.base import ResourceNotFound, TransientSourceError
 from predictor.ingestion.http import HttpClient, RateLimiter
+from tests.support import FakeClock, scripted_transport
 
 URL = "https://example.test/mmz4281/2425/E0.csv"
 RESOURCE = "mmz4281/2425/E0.csv"

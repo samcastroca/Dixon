@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import pytest
-from tests.support import corrupt_bytes, recorded_bytes
 
 from predictor.config import get_settings
 from predictor.ingestion.staging import parse_rows
 from predictor.processing.clean import RowCleaner
 from predictor.processing.validate import ProcessingValidationError, validate
+from tests.support import corrupt_bytes, recorded_bytes
 
 ENCODINGS = ("utf-8-sig", "cp1252")
 

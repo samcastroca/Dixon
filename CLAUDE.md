@@ -2,7 +2,8 @@
 
 Full specification: `docs/SPEC.pdf`. Read the sections a task touches before writing code.
 
-**Current phase: 4 (backtesting & baselines) — complete.** Next up is phase 5 (statistical models M1-M4).
+**Current phase: 5 (statistical models M1-M4) — complete.** Next up is phase 6 (LightGBM,
+ensemble and calibration).
 
 ## Non-negotiable rules
 
@@ -133,3 +134,26 @@ data/raw/                 # gitignored local cache
   unique key is declared `NULLS NOT DISTINCT`, or the pooled rows would duplicate.
 - Team names are resolved through `config/team_aliases.yaml` (canonical name -> spellings, per
   competition); an unknown spelling raises `UnknownTeamError` instead of being guessed.
+- **The statistical models live under `models/`**: `elo_model.py` (M1), `poisson.py` (M2),
+  `dixon_coles.py` (M3), `bayesian.py` (M4) and `scorelines.py`, which owns the arithmetic all
+  three goal models share. Their tunables are the `models:` section of `settings.yaml`, a
+  sibling of `backtest:` for the same reason: anything inside `features:` is hashed into the
+  feature store's `definition_checksum`.
+- **A scoreline matrix keeps its truncation error and a probability row does not.** The matrix
+  is truncated at `models.max_goals` and its missing mass is reported by
+  `scorelines.truncation_deficit`; the 1X2 row derived from it is normalised. The configured
+  `max_goals` is 12 rather than the spec's 10, because 10 leaves 3.8e-04 outside the grid for
+  the highest-scoring fixture and the acceptance test allows 1e-4.
+- **Sum-to-zero is parameterised in, not penalised**: the free vector of M2 and M3 carries
+  `n - 1` attacks and defences and derives the last, so the constraint holds exactly.
+- **M3 tunes its time decay per league inside `fit()`**, by an inner walk-forward over the
+  *training* seasons only (`models.dixon_coles.xi`). Because M3 is registered behind
+  `PerCompetition`, that tuning is per league without any league being named in logic.
+- **M1 does not recompute Elo.** It reads `elo_diff` from the phase 3 feature store and fits an
+  ordered logistic regression over it; a missing feature column is an error, never a shrug.
+- **A fold's feature frame spans every competition**, because its training frame does
+  (`view.played()` is global). Building it from one league's store would hand the other
+  league's `PerCompetition` member an empty frame.
+- **What a fit learned goes to `model_parameters`** through the optional `Parameterised`
+  protocol, and `make report` renders it as one table per model. That is where the home
+  advantage, rho and the chosen decay per league are read.

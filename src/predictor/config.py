@@ -316,6 +316,69 @@ class FeaturesSettings(BaseModel):
     market: MarketFeatureSettings = MarketFeatureSettings()
 
 
+class MetricsSettings(BaseModel):
+    """Phase 4 knobs: how a probability is scored (spec section 8)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    #: Bins of the expected calibration error; the spec asks for ten.
+    ece_bins: Annotated[int, Field(ge=2, le=100)] = 10
+    #: Probabilities are clipped to this floor, so one confident miss is not an infinite loss.
+    log_loss_floor: Annotated[float, Field(gt=0, lt=0.5)] = 1e-15
+
+
+class BootstrapSettings(BaseModel):
+    """Paired bootstrap of a metric difference: a model is only better if zero is excluded."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    resamples: Annotated[int, Field(ge=100, le=100_000)] = 2000
+    confidence: Annotated[float, Field(gt=0.5, lt=1.0)] = 0.95
+    #: Fixed, so the same predictions always give the same interval.
+    seed: int = 20260926
+
+
+class ReportSettings(BaseModel):
+    """Where the model comparison is written and in which formats."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    directory: str = "reports"
+    formats: Annotated[tuple[Literal["markdown", "html"], ...], Field(min_length=1)] = (
+        "markdown",
+        "html",
+    )
+
+
+class BacktestSettings(BaseModel):
+    """Phase 4 knobs: the walk-forward protocol (spec section 8).
+
+    This lives outside `features` on purpose: the feature store's definition checksum hashes
+    that whole section, so a backtesting knob in there would invalidate every stored row.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    default_seasons: str = "2019-2025"
+    experiment: Annotated[str, Field(min_length=1)] = "predictor-backtest"
+    #: Which feature store the models read; None means `features.version`.
+    feature_version: Annotated[str | None, Field(max_length=16)] = None
+    #: 0 fits once per test season; N refits whenever the team with the fewest matches
+    #: played in that season has played N more. The source files carry no matchweek.
+    refit_every_matchweeks: Annotated[int, Field(ge=0, le=38)] = 0
+    #: A fold with less history than this is not worth fitting, and is skipped loudly.
+    min_train_matches: Annotated[int, Field(ge=0)] = 380
+    #: The model every other model's RPS gap is measured against.
+    reference_model: Annotated[str, Field(min_length=1)] = "baseline_market"
+    metrics: MetricsSettings = MetricsSettings()
+    bootstrap: BootstrapSettings = BootstrapSettings()
+    report: ReportSettings = ReportSettings()
+    #: The market benchmark reads closing prices this source publishes without a capture
+    #: time. That is why it has its own block: the exemption belongs to one undeployable
+    #: benchmark, not to the feature store, whose market group stays off.
+    market_baseline: MarketFeatureSettings = MarketFeatureSettings(allow_missing_captured_at=True)
+
+
 class AppSettings(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -367,6 +430,7 @@ class Settings(BaseSettings):
     ingestion: IngestionSettings = IngestionSettings()
     processing: ProcessingSettings = ProcessingSettings()
     features: FeaturesSettings = FeaturesSettings()
+    backtest: BacktestSettings = BacktestSettings()
     sources: Mapping[str, SourceSettings] = {}
     competitions: Annotated[tuple[Competition, ...], Field(min_length=1)]
 

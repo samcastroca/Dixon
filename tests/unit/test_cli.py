@@ -37,6 +37,29 @@ def test_process_is_no_longer_a_stub() -> None:
     assert "--seasons" in result.output
 
 
+def test_backtest_is_no_longer_a_stub() -> None:
+    assert "backtest" not in PLANNED_COMMANDS
+
+    result = runner.invoke(app, ["backtest", "--help"])
+
+    assert result.exit_code == 0
+    assert "--model" in result.output
+    assert "--seasons" in result.output
+
+
+def test_backtest_rejects_an_unknown_model() -> None:
+    result = runner.invoke(app, ["backtest", "--model", "no_such_model"])
+
+    assert result.exit_code == 2
+    assert "no_such_model" in result.output
+
+
+def test_report_is_a_command_of_its_own() -> None:
+    result = runner.invoke(app, ["report", "--help"])
+
+    assert result.exit_code == 0
+
+
 def test_ingest_rejects_an_unknown_source() -> None:
     result = runner.invoke(app, ["ingest", "--source", "api_football"])
 

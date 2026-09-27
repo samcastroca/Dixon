@@ -266,3 +266,59 @@ class Feature(Base):
     )
     definition_checksum: Mapped[str] = mapped_column(String(64))
     feature_values: Mapped[dict[str, Any]] = mapped_column(JSONB)
+
+
+#: The slices a backtest is scored at, mirrored from the evaluation module's scopes.
+BACKTEST_SCOPES = ("pooled", "competition", "season")
+BACKTEST_SCOPE_CHECK = _in_clause("scope", BACKTEST_SCOPES)
+
+
+class BacktestResult(Base):
+    """One scored slice of one walk-forward run, mirroring MLflow (spec section 5).
+
+    A slice is pooled, one competition, or one competition-season, so `competition_id` and
+    `season_id` are null for the coarser scopes. Postgres would treat those nulls as distinct
+    and happily store the same pooled row twice, which is why the unique constraint is declared
+    NULLS NOT DISTINCT: re-mirroring a run has to be idempotent.
+    """
+
+    __tablename__ = "backtest_results"
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id",
+            "model_name",
+            "scope",
+            "competition_id",
+            "season_id",
+            name="uq_backtest_results_slice",
+            postgresql_nulls_not_distinct=True,
+        ),
+        CheckConstraint(BACKTEST_SCOPE_CHECK, name="ck_backtest_results_scope"),
+        CheckConstraint("n >= 0", name="ck_backtest_results_sample"),
+        Index("ix_backtest_results_model", "model_name", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    #: The MLflow run the numbers came from, so a row can always be traced back.
+    run_id: Mapped[str] = mapped_column(String(64))
+    model_name: Mapped[str] = mapped_column(String(64))
+    scope: Mapped[str] = mapped_column(String(16))
+    competition_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("competitions.id", ondelete="CASCADE"), nullable=True
+    )
+    season_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("seasons.id", ondelete="CASCADE"), nullable=True
+    )
+    feature_version: Mapped[str] = mapped_column(String(16))
+    git_sha: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    n: Mapped[int] = mapped_column(Integer)
+    rps: Mapped[float] = mapped_column(Float)
+    log_loss: Mapped[float] = mapped_column(Float)
+    brier: Mapped[float] = mapped_column(Float)
+    ece: Mapped[float] = mapped_column(Float)
+    #: The model this slice's RPS gap is measured against, and the paired bootstrap interval.
+    reference_model: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    rps_gap: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rps_gap_ci_low: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rps_gap_ci_high: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

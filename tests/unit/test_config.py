@@ -8,7 +8,13 @@ from zoneinfo import ZoneInfo
 import pytest
 from pydantic import ValidationError
 
-from predictor.config import Settings, get_settings
+from predictor.config import (
+    BacktestSettings,
+    BootstrapSettings,
+    ReportSettings,
+    Settings,
+    get_settings,
+)
 
 VALID_COMPETITION = """
 competitions:
@@ -103,3 +109,37 @@ def test_rejects_unknown_tiebreaker(settings_file: Path) -> None:
 
     with pytest.raises(ValidationError):
         Settings()
+
+
+def test_the_backtest_section_is_loaded_with_the_walk_forward_knobs() -> None:
+    backtest = get_settings().backtest
+
+    assert backtest.default_seasons == "2019-2025"
+    assert backtest.metrics.ece_bins == 10
+    assert backtest.bootstrap.confidence == 0.95
+    assert backtest.report.formats == ("markdown", "html")
+    assert backtest.reference_model == "baseline_market"
+
+
+def test_the_market_benchmark_is_the_only_place_undated_quotes_are_allowed() -> None:
+    """The feature store refuses them; the undeployable benchmark of spec section 7 may use them."""
+    settings = get_settings()
+
+    assert settings.backtest.market_baseline.allow_missing_captured_at is True
+    assert settings.features.market.allow_missing_captured_at is False
+    assert settings.features.groups.market is False
+
+
+def test_a_negative_refit_cadence_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        BacktestSettings(refit_every_matchweeks=-1)
+
+
+def test_a_bootstrap_without_resamples_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        BootstrapSettings(resamples=0)
+
+
+def test_an_unknown_report_format_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        ReportSettings(formats=("pdf",))

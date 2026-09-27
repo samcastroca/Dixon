@@ -1,4 +1,4 @@
-.PHONY: help up down logs check test lint types migrate revision fmt build ingest process features
+.PHONY: help up down logs check test lint types migrate revision fmt build ingest process features backtest report
 
 UV ?= uv
 COMPOSE ?= docker compose
@@ -50,6 +50,19 @@ VERSION ?= v1
 
 features:  ## Build the point-in-time feature store: make features VERSION=v1
 	$(COMPOSE) run --rm --build pipeline predictor features --version $(VERSION) --competition $(COMPETITIONS)
+
+MODEL ?= baseline_market
+# The test window of spec phase 4, kept apart from the SEASONS that ingestion fetches.
+TEST_SEASONS ?= 2019-2025
+
+# The image has no git, so the commit the run belongs to is handed in from the host.
+GIT_SHA ?= $(shell git rev-parse HEAD)
+
+backtest:  ## Walk-forward backtest: make backtest MODEL=baseline_market TEST_SEASONS=2019-2025
+	$(COMPOSE) --profile later run --rm --build -e GIT_SHA=$(GIT_SHA) train predictor backtest --model $(MODEL) --seasons $(TEST_SEASONS) --competition $(COMPETITIONS)
+
+report:  ## Write reports/backtest.md and .html from the stored backtest results
+	$(UV) run predictor report
 
 migrate:  ## Apply the migrations (alembic upgrade head)
 	$(UV) run alembic upgrade head

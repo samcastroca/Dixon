@@ -7,11 +7,14 @@ from typing import Annotated
 import typer
 
 from predictor.config import Competition, Settings, get_settings
+from predictor.evaluation.report import ordered as _report_order
+from predictor.evaluation.service import run_backtest, write_stored_report
 from predictor.features.service import build_features as run_features
 from predictor.ingestion.football_data_uk import FootballDataUkSource
 from predictor.ingestion.seasons import parse_seasons
 from predictor.ingestion.service import ingest as run_ingest
 from predictor.logging import bind_run_id, configure_logging, get_logger
+from predictor.models.registry import MODEL_NAMES
 from predictor.processing.service import process as run_process
 
 app = typer.Typer(help="Sports results prediction platform", no_args_is_help=True)
@@ -22,7 +25,6 @@ logger = get_logger(__name__)
 
 #: command name -> the phase (spec section 11) that implements it
 PLANNED_COMMANDS: dict[str, int] = {
-    "backtest": 4,
     "train": 6,
     "predict": 7,
 }
@@ -174,10 +176,89 @@ def features(
             typer.echo(f"  {name:<40}{'-' if value is None else format(value, '.6g')}")
 
 
+def _selected_models(models: str | None) -> list[str]:
+    """Resolve a comma-separated list of model names, defaulting to every registered one."""
+    if not models:
+        return list(MODEL_NAMES)
+    names = [name.strip() for name in models.split(",") if name.strip()]
+    unknown = [name for name in names if name not in MODEL_NAMES]
+    if unknown:
+        typer.echo(
+            f"unknown model(s) {', '.join(unknown)}; registered: {', '.join(MODEL_NAMES)}", err=True
+        )
+        raise typer.Exit(code=2)
+    return names
+
+
 @app.command()
-def backtest() -> None:
-    """Run the walk-forward backtest (phase 4)."""
-    _not_yet("backtest")
+def backtest(
+    model: Annotated[
+        str | None,
+        typer.Option(
+            help="Comma-separated model names; default: every registered model, which is what "
+            "the RPS gap against the market benchmark needs"
+        ),
+    ] = None,
+    seasons: Annotated[
+        str | None,
+        typer.Option(help="Test seasons, like 2019-2025; default: backtest.default_seasons"),
+    ] = None,
+    competition: Annotated[
+        str | None, typer.Option(help="Comma-separated competition codes; default: all")
+    ] = None,
+    version: Annotated[
+        str | None, typer.Option(help="Feature version to read; default: backtest.feature_version")
+    ] = None,
+) -> None:
+    """Run the walk-forward backtest and record it in MLflow and backtest_results."""
+    settings = get_settings()
+    names = _selected_models(model)
+    competitions = _selected_competitions(settings, competition)
+    season_labels = parse_seasons(seasons or settings.backtest.default_seasons)
+
+    outcome = run_backtest(names, competitions, seasons=season_labels, version=version)
+
+    typer.echo(
+        f"run {outcome.run_id}  features {outcome.feature_version}  "
+        f"seasons {season_labels[0]}..{season_labels[-1]}"
+    )
+    typer.echo("")
+    typer.echo(
+        f"{'MODEL':<22}{'SCOPE':<12}{'LEAGUE':<8}{'SEASON':<9}{'N':>6}"
+        f"{'RPS':>9}{'LOGLOSS':>9}{'BRIER':>9}{'ECE':>8}{'GAP':>9}  95% CI"
+    )
+    for row in _report_order(outcome.rows):
+        interval = (
+            ""
+            if row.rps_gap_ci_low is None or row.rps_gap_ci_high is None
+            else f"  [{row.rps_gap_ci_low:+.4f}, {row.rps_gap_ci_high:+.4f}]"
+        )
+        typer.echo(
+            f"{row.model_name:<22}{row.scope:<12}{row.competition or '-':<8}"
+            f"{row.season_label or '-':<9}{row.n:>6}{row.rps:>9.4f}{row.log_loss:>9.4f}"
+            f"{row.brier:>9.4f}{row.ece:>8.4f}"
+            f"{'' if row.rps_gap is None else format(row.rps_gap, '>+9.4f')}{interval}"
+        )
+    typer.echo("")
+    for comparison in outcome.comparisons:
+        if comparison.scope != "competition":
+            continue
+        verdict = "significant" if comparison.excludes_zero else "not significant"
+        typer.echo(
+            f"{comparison.model_name} vs {comparison.reference_model} in {comparison.competition}: "
+            f"RPS {comparison.difference:+.4f} "
+            f"[{comparison.low:+.4f}, {comparison.high:+.4f}] on {comparison.n} matches, {verdict}"
+        )
+    typer.echo("")
+    typer.echo(f"{outcome.stored} rows mirrored into backtest_results")
+
+
+@app.command()
+def report() -> None:
+    """Write the model comparison table from the stored backtest results."""
+    written = write_stored_report()
+    for path in written:
+        typer.echo(f"wrote {path}")
 
 
 @app.command()

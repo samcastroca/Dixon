@@ -122,6 +122,40 @@ features:
     # Using a quote we cannot date has to be a decision, not an oversight.
     allow_missing_captured_at: false
 
+# Phase 4: the walk-forward backtest (spec section 8). Not inside `features`, because the
+# feature store's definition checksum hashes that whole section.
+backtest:
+  default_seasons: 2019-2025
+  experiment: predictor-backtest
+  # Which feature store the models read; empty means features.version.
+  feature_version: null
+  # 0 = one fit per test season. N = refit whenever the team with the fewest matches played
+  # in that season has played N more; the source files carry no matchweek column.
+  refit_every_matchweeks: 0
+  # A fold with less history than this is skipped instead of fitted on nothing.
+  min_train_matches: 380
+  # Every model's RPS gap is reported against this one.
+  reference_model: baseline_market
+  metrics:
+    ece_bins: 10
+    log_loss_floor: 1.0e-15
+  bootstrap:
+    resamples: 2000
+    confidence: 0.95
+    # Fixed, so the same predictions always give the same interval.
+    seed: 20260926
+  report:
+    directory: reports
+    formats: [markdown, html]
+  # The market benchmark (M0b) uses closing prices published without a capture time. It is a
+  # benchmark, never a deployable model, which is why the exemption lives here and the feature
+  # store's market group stays off.
+  market_baseline:
+    bookmaker: PS
+    method: shin
+    prefer_closing: true
+    allow_missing_captured_at: true
+
 # Competitions are data, not code. Adding a league must never require touching logic.
 competitions:
   - code: EPL

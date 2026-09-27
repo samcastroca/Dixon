@@ -38,6 +38,8 @@ services:
       start_period: 10s
     networks: [predictor]
 
+  # The server rejects Host headers it does not know (DNS rebinding protection), and the
+  # batch services reach it by its compose name, so that name has to be allowed explicitly.
   mlflow:
     build:
       context: .
@@ -49,6 +51,7 @@ services:
       --port 5000
       --backend-store-uri postgresql://${POSTGRES_USER:-predictor}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/mlflow
       --artifacts-destination /mlflow/artifacts
+      --allowed-hosts mlflow:5000,localhost:5000,127.0.0.1:5000
     volumes:
       - mlflow-artifacts:/mlflow/artifacts
     ports:
@@ -84,11 +87,15 @@ services:
     <<: *app
     command: ["predictor", "process"]
 
-  # --- stubs for later phases -------------------------------------------------
+  # Phase 4 gave this service its first real job. It stays behind the profile because a
+  # backtest is a job rather than a service: `make backtest` targets it explicitly, and
+  # `docker compose up` has no business running one.
   train:
     <<: *app
     profiles: ["later"]
-    command: ["predictor", "train"]
+    command: ["predictor", "backtest"]
+
+  # --- stubs for later phases -------------------------------------------------
 
   dashboard:
     <<: *app

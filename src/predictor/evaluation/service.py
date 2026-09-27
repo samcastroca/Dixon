@@ -21,6 +21,7 @@ from predictor.evaluation.backtest import (
     POOLED,
     SEASON,
     CompetitionHistory,
+    FittedParameters,
     ModelRun,
     Prediction,
     ScopedMetrics,
@@ -30,7 +31,7 @@ from predictor.evaluation.backtest import (
 )
 from predictor.evaluation.bootstrap import Interval, paired_bootstrap
 from predictor.evaluation.metrics import rps
-from predictor.evaluation.report import ReportRow, write_report
+from predictor.evaluation.report import ParameterRow, ReportRow, write_report
 from predictor.logging import get_logger
 from predictor.models.registry import MODEL_NAMES, factory
 
@@ -49,6 +50,10 @@ _PREDICTION_HEADER = (
     "p_away",
     "outcome",
 )
+
+#: Columns of the fitted-parameters artifact. The parameter itself is one row per name, because
+#: every model reports a different set and a fixed column list would not fit all of them.
+_PARAMETER_HEADER = ("model", "competition", "season", "fit", "parameter", "value")
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,8 +90,11 @@ class BacktestOutcome:
     scored: Mapping[str, tuple[ScopedMetrics, ...]]
     comparisons: tuple[Comparison, ...]
     rows: tuple[ReportRow, ...]
+    parameters: tuple[ParameterRow, ...]
     records: tuple[Mapping[str, object], ...]
     stored: int
+    #: How many `model_parameters` rows this run wrote.
+    stored_parameters: int
 
     def run_of(self, model_name: str) -> ModelRun:
         return next(run for run in self.runs if run.model_name == model_name)
@@ -121,19 +129,28 @@ def run_backtest(
 
         with tracking.tracked_run(resolved, run_name=_run_name(names)) as tracker:
             _log_run(tracker, resolved, names, competitions, seasons, histories, feature_version)
+            _log_fitted_parameters(tracker, runs)
             _log_metrics(tracker, scored, comparisons)
             _log_artifacts(tracker, resolved, runs, scored)
             run_id = tracker.run_id
 
+        competition_ids = repository.competition_ids(session)
+        season_ids = repository.season_ids(session)
         records = _records(
             rows,
             run_id=run_id,
             feature_version=feature_version,
             reference_model=resolved.backtest.reference_model,
-            competitions=repository.competition_ids(session),
-            seasons=repository.season_ids(session),
+            competitions=competition_ids,
+            seasons=season_ids,
         )
         stored = repository.upsert_backtest_results(session, records)
+        stored_parameters = repository.upsert_model_parameters(
+            session,
+            _parameter_records(
+                runs, run_id=run_id, competitions=competition_ids, seasons=season_ids
+            ),
+        )
 
     logger.info(
         "backtest.finished",
@@ -142,6 +159,7 @@ def run_backtest(
         folds=sum(len(run.folds) for run in runs),
         predictions=sum(len(run.predictions) for run in runs),
         stored=stored,
+        stored_parameters=stored_parameters,
     )
     return BacktestOutcome(
         run_id=run_id,
@@ -154,8 +172,10 @@ def run_backtest(
         scored=scored,
         comparisons=comparisons,
         rows=rows,
+        parameters=parameter_rows(runs),
         records=records,
         stored=stored,
+        stored_parameters=stored_parameters,
     )
 
 
@@ -239,17 +259,36 @@ def report_rows(
     return tuple(rows)
 
 
-def stored_rows() -> tuple[ReportRow, ...]:
-    """The latest stored run of every model, which is what `make report` tabulates."""
+def parameter_rows(runs: Sequence[ModelRun]) -> tuple[ParameterRow, ...]:
+    """Every fit of a run as the report holds it, in a stable order."""
+    return tuple(
+        ParameterRow(
+            model_name=fit.model_name,
+            competition=fit.competition,
+            season_label=fit.season_label,
+            fit_index=fit.fit_index,
+            values=dict(fit.values),
+        )
+        for run in runs
+        for fit in run.parameters
+    )
+
+
+def stored_rows() -> tuple[tuple[ReportRow, ...], tuple[ParameterRow, ...]]:
+    """The latest stored run of every model: the metrics and the parameters behind them."""
     with session_scope() as session:
-        return repository.latest_results(session)
+        return repository.latest_results(session), repository.latest_parameters(session)
 
 
 def write_stored_report(settings: Settings | None = None) -> tuple[Path, ...]:
-    """Render the comparison table from what `backtest_results` holds."""
+    """Render the comparison table and the fitted parameters from what the database holds."""
     resolved = settings or get_settings()
+    rows, parameters = stored_rows()
     return write_report(
-        stored_rows(), reference_model=resolved.backtest.reference_model, settings=resolved
+        rows,
+        reference_model=resolved.backtest.reference_model,
+        parameters=parameters,
+        settings=resolved,
     )
 
 
@@ -325,6 +364,81 @@ def _log_run(
     )
 
 
+def _parameter_records(
+    runs: Sequence[ModelRun],
+    *,
+    run_id: str,
+    competitions: Mapping[str, int],
+    seasons: Mapping[tuple[int, str], int],
+) -> tuple[Mapping[str, object], ...]:
+    """The rows of `model_parameters`, with the league and season resolved to their ids."""
+    records: list[Mapping[str, object]] = []
+    for run in runs:
+        for fit in run.parameters:
+            competition_id = competitions[fit.competition]
+            records.append(
+                {
+                    "run_id": run_id,
+                    "model_name": fit.model_name,
+                    "competition_id": competition_id,
+                    "season_id": seasons.get((competition_id, fit.season_label)),
+                    "fit_index": fit.fit_index,
+                    "parameter_values": dict(fit.values),
+                }
+            )
+    return tuple(records)
+
+
+def _parameters_csv(directory: Path, runs: Sequence[ModelRun]) -> Path:
+    """Every fit of every model, long format, so one file fits every model's parameter set."""
+    path = directory / "fitted_parameters.csv"
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(_PARAMETER_HEADER)
+        for run in runs:
+            for fit in run.parameters:
+                for name, value in sorted(fit.values.items()):
+                    writer.writerow(
+                        [
+                            fit.model_name,
+                            fit.competition,
+                            fit.season_label,
+                            fit.fit_index,
+                            name,
+                            value,
+                        ]
+                    )
+    return path
+
+
+def _log_fitted_parameters(tracker: tracking.Tracker, runs: Sequence[ModelRun]) -> None:
+    """The parameters of the first fit of each league as MLflow params, the rest as an artifact.
+
+    MLflow params are scalars and a run refitting every matchweek would produce hundreds, so
+    only the fit that opens each league's earliest test season goes there; the artifact carries
+    every fit.
+    """
+    opening: dict[tuple[str, str], FittedParameters] = {}
+    for run in runs:
+        for fit in run.parameters:
+            key = (fit.model_name, fit.competition)
+            current = opening.get(key)
+            if current is None or (fit.season_label, fit.fit_index) < (
+                current.season_label,
+                current.fit_index,
+            ):
+                opening[key] = fit
+    if not opening:
+        return
+    tracker.log_params(
+        {
+            f"{model_name}.{competition}.{name}": value
+            for (model_name, competition), fit in sorted(opening.items())
+            for name, value in sorted(fit.values.items())
+        }
+    )
+
+
 def _log_metrics(
     tracker: tracking.Tracker,
     scored: Mapping[str, Sequence[ScopedMetrics]],
@@ -373,6 +487,8 @@ def _log_artifacts(
                 ):
                     tracker.log_artifact(path, artifact_path="reliability")
         tracker.log_artifact(_predictions_csv(directory, runs), artifact_path="predictions")
+        if any(run.parameters for run in runs):
+            tracker.log_artifact(_parameters_csv(directory, runs), artifact_path="parameters")
 
 
 def _predictions_csv(directory: Path, runs: Sequence[ModelRun]) -> Path:

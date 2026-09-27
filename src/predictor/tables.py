@@ -322,3 +322,46 @@ class BacktestResult(Base):
     rps_gap_ci_low: Mapped[float | None] = mapped_column(Float, nullable=True)
     rps_gap_ci_high: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ModelParameters(Base):
+    """What one fit learned, so `make report` can show it without rerunning anything.
+
+    One row per fit: a model, a league, a test season and the index of the refit inside it.
+    The values live in a JSONB document rather than in columns because every model reports a
+    different set -- M3 has rho and a decay, M1 has two cutpoints, M4 has its pooling scales --
+    and a new model must not need a migration to be reported (the same reasoning as `features`).
+
+    The column is `parameter_values` and not `values` for the same reason as
+    `features.feature_values`: VALUES is reserved in Postgres.
+    """
+
+    __tablename__ = "model_parameters"
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id",
+            "model_name",
+            "competition_id",
+            "season_id",
+            "fit_index",
+            name="uq_model_parameters_fit",
+            postgresql_nulls_not_distinct=True,
+        ),
+        CheckConstraint("fit_index >= 0", name="ck_model_parameters_fit_index"),
+        Index("ix_model_parameters_model", "model_name", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    #: The MLflow run the fit belongs to, so a row can always be traced back.
+    run_id: Mapped[str] = mapped_column(String(64))
+    model_name: Mapped[str] = mapped_column(String(64))
+    competition_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("competitions.id", ondelete="CASCADE")
+    )
+    season_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("seasons.id", ondelete="CASCADE"), nullable=True
+    )
+    #: 0 is the fit that opens a test season; 1 and up are the refits inside it.
+    fit_index: Mapped[int] = mapped_column(Integer)
+    parameter_values: Mapped[dict[str, float]] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

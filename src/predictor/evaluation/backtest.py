@@ -40,6 +40,7 @@ from predictor.models.base import (
     PROBABILITY_COLUMNS,
     HistoryAware,
     MatchModel,
+    fitted_parameters_of,
     validate_probabilities,
 )
 
@@ -80,6 +81,22 @@ class Fold:
 
 
 @dataclass(frozen=True, slots=True)
+class FittedParameters:
+    """What one fit learned, recorded next to the fold it belongs to (spec section 11).
+
+    A fold belongs to one league, so these are that league's parameters: the home advantage,
+    rho and decay the report shows per competition come straight from here.
+    """
+
+    model_name: str
+    competition: str
+    season_id: int
+    season_label: str
+    fit_index: int
+    values: Mapping[str, float]
+
+
+@dataclass(frozen=True, slots=True)
 class Prediction:
     """One scored forecast: what the model said, when it said it, and what happened."""
 
@@ -107,6 +124,8 @@ class ModelRun:
     deployable: bool
     predictions: tuple[Prediction, ...]
     folds: tuple[Fold, ...]
+    #: One entry per fit, for the models that report what they fitted. Empty for a baseline.
+    parameters: tuple[FittedParameters, ...]
     #: Fixtures the model declined, and matches with no result to score.
     declined: int
     unscorable: int
@@ -145,7 +164,15 @@ class WalkForward:
     compared on exactly the same folds and the same matches.
     """
 
-    __slots__ = ("_histories", "_index", "_offset", "_settings", "_wanted")
+    __slots__ = (
+        "_feature_names",
+        "_features_by_match",
+        "_histories",
+        "_index",
+        "_offset",
+        "_settings",
+        "_wanted",
+    )
 
     def __init__(
         self,
@@ -162,6 +189,16 @@ class WalkForward:
         self._index = HistoryIndex.from_records(
             record for history in self._histories for record in history.records
         )
+        # One feature lookup over every competition, for the same reason as the index above: a
+        # fold's training frame is the whole guarded past, both leagues included, so a per-league
+        # lookup would hand the other league's rows an empty frame. `PerCompetition` splits that
+        # frame by league and would then fit one member with no features at all.
+        self._features_by_match = {
+            match_id: stored
+            for history in self._histories
+            for match_id, stored in history.features.items()
+        }
+        self._feature_names = _feature_names(self._histories)
 
     @property
     def index(self) -> HistoryIndex:
@@ -172,6 +209,7 @@ class WalkForward:
         probe = factory()
         folds: list[Fold] = []
         predictions: list[Prediction] = []
+        parameters: list[FittedParameters] = []
         declined = 0
         unscorable = 0
 
@@ -182,6 +220,7 @@ class WalkForward:
                 )
                 folds.extend(outcome.folds)
                 predictions.extend(outcome.predictions)
+                parameters.extend(outcome.parameters)
                 declined += outcome.declined
                 unscorable += outcome.unscorable
 
@@ -190,6 +229,7 @@ class WalkForward:
             deployable=probe.deployable,
             predictions=tuple(predictions),
             folds=tuple(folds),
+            parameters=tuple(parameters),
             declined=declined,
             unscorable=unscorable,
         )
@@ -221,10 +261,12 @@ class WalkForward:
     ) -> _SeasonOutcome:
         """One test season: fit, then predict batch by batch, refitting on cadence."""
         competition = history.competition.code
+        competition_id = records[0].competition_id
         cadence = self._settings.backtest.refit_every_matchweeks
         participants = _participants(records)
         folds: list[Fold] = []
         predictions: list[Prediction] = []
+        parameters: list[FittedParameters] = []
         declined = 0
         unscorable = 0
         model: MatchModel | None = None
@@ -246,25 +288,38 @@ class WalkForward:
                     )
                     break
                 fold = _fold(competition, season_id, label, len(folds), view, training, kickoff)
-                model = self._fit(factory, history, training, view)
+                model = self._fit(factory, training, view)
                 folds.append(fold)
+                fitted = fitted_parameters_of(model, competition_id)
+                if fitted is not None:
+                    parameters.append(
+                        FittedParameters(
+                            model_name=model.name,
+                            competition=competition,
+                            season_id=season_id,
+                            season_label=label,
+                            fit_index=fold.fit_index,
+                            values=dict(fitted),
+                        )
+                    )
                 played_at_last_fit = played
 
             if model is None:
                 break
             batch_predictions, batch_declined, batch_unscorable = self._predict(
-                model, history, batch, view, market=market
+                model, competition, batch, view, market=market
             )
             predictions.extend(batch_predictions)
             declined += batch_declined
             unscorable += batch_unscorable
 
-        return _SeasonOutcome(tuple(folds), tuple(predictions), declined, unscorable)
+        return _SeasonOutcome(
+            tuple(folds), tuple(predictions), tuple(parameters), declined, unscorable
+        )
 
     def _fit(
         self,
         factory: Callable[[], MatchModel],
-        history: CompetitionHistory,
         training: Sequence[MatchRecord],
         view: HistoryView,
     ) -> MatchModel:
@@ -272,12 +327,12 @@ class WalkForward:
         model = factory()
         if isinstance(model, HistoryAware):
             model.bind_history(view)
-        return model.fit(frames.matches_frame(training), self._features(history, training, view))
+        return model.fit(frames.matches_frame(training), self._features(training, view))
 
     def _predict(
         self,
         model: MatchModel,
-        history: CompetitionHistory,
+        competition: str,
         batch: Sequence[MatchRecord],
         view: HistoryView,
         *,
@@ -294,7 +349,7 @@ class WalkForward:
         )
         requested = [record.match_id for record in batch]
         answer = validate_probabilities(
-            model.predict_proba(frame, self._features(history, fixtures, view)), requested
+            model.predict_proba(frame, self._features(fixtures, view)), requested
         )
 
         answered = answer["match_id"].to_numpy(dtype=np.int64)
@@ -321,7 +376,7 @@ class WalkForward:
             predictions.append(
                 Prediction(
                     match_id=record.match_id,
-                    competition=history.competition.code,
+                    competition=competition,
                     season_id=record.season_id,
                     season_label=record.season_label,
                     kickoff_utc=record.kickoff_utc,
@@ -334,18 +389,13 @@ class WalkForward:
             )
         return tuple(predictions), len(batch) - len(by_match), unscorable
 
-    def _features(
-        self,
-        history: CompetitionHistory,
-        records: Sequence[MatchRecord],
-        view: HistoryView,
-    ) -> pd.DataFrame | None:
+    def _features(self, records: Sequence[MatchRecord], view: HistoryView) -> pd.DataFrame | None:
         """The stored feature rows of these matches, refusing any stamped after the cut-off."""
-        if not history.features:
+        if not self._features_by_match:
             return None
         rows: list[StoredFeatures] = []
         for record in records:
-            stored = history.features.get(record.match_id)
+            stored = self._features_by_match.get(record.match_id)
             if stored is None:
                 continue
             if stored.as_of_utc > view.as_of:
@@ -355,15 +405,30 @@ class WalkForward:
                 )
                 raise LeakageError(msg)
             rows.append(stored)
-        return frames.features_frame(rows, history.feature_names)
+        return frames.features_frame(rows, self._feature_names)
 
 
 @dataclass(frozen=True, slots=True)
 class _SeasonOutcome:
     folds: tuple[Fold, ...]
     predictions: tuple[Prediction, ...]
+    parameters: tuple[FittedParameters, ...]
     declined: int
     unscorable: int
+
+
+def _feature_names(histories: Sequence[CompetitionHistory]) -> tuple[str, ...]:
+    """The feature names every competition shares, which one feature version guarantees.
+
+    They are read from one store built by one builder, so they have to agree; if they do not,
+    something has written two different definitions under the same version and a model would be
+    fitted on silently different columns per league.
+    """
+    named = {history.feature_names for history in histories if history.feature_names}
+    if len(named) > 1:
+        msg = f"the competitions of this run carry different feature names: {sorted(named)}"
+        raise ValueError(msg)
+    return next(iter(named), ())
 
 
 def _batches(records: Sequence[MatchRecord]) -> Iterator[tuple[datetime, tuple[MatchRecord, ...]]]:

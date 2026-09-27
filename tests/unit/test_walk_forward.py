@@ -3,15 +3,21 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pandas as pd
 import pytest
 
 from predictor.config import BacktestSettings, Competition, Settings, get_settings
 from predictor.evaluation.backtest import CompetitionHistory, WalkForward
+from predictor.evaluation.frames import StoredFeatures
 from predictor.features.replay import HistoryView, LeakageError, MatchRecord
-from predictor.models.base import PROBABILITY_COLUMNS, MatchModel, ScoreMatrices
+from predictor.models.base import (
+    PROBABILITY_COLUMNS,
+    MatchModel,
+    PerCompetition,
+    ScoreMatrices,
+)
 from tests.support import kickoff, record
 
 #: Four teams and a double round-robin: six rounds of two matches, 12 matches a season.
@@ -323,3 +329,79 @@ def test_a_competition_without_a_second_season_has_nothing_to_test() -> None:
 def test_a_toy_competition_is_only_as_big_as_it_looks() -> None:
     assert len(fixtures_of(1, SEASON_LABELS[0], 1)) == MATCHES_PER_SEASON
     assert isinstance(history().competition, Competition)
+
+
+class FeatureHungry(Uniform):
+    """A model that refuses to predict without a feature column, as M1 does."""
+
+    COLUMN = "elo_diff"
+
+    def fit(self, matches: pd.DataFrame, features: pd.DataFrame | None) -> FeatureHungry:
+        if features is None or self.COLUMN not in features:
+            msg = f"no {self.COLUMN} in the training features"
+            raise ValueError(msg)
+        missing = features[self.COLUMN].isna().sum()
+        if missing:
+            msg = f"{missing} training rows have no {self.COLUMN}"
+            raise ValueError(msg)
+        return self
+
+
+def stored_features(records: Sequence[MatchRecord]) -> dict[int, StoredFeatures]:
+    """One feature row per match, stamped a second before kickoff as the store stamps them."""
+    return {
+        entry.match_id: StoredFeatures(
+            match_id=entry.match_id,
+            as_of_utc=entry.kickoff_utc - timedelta(seconds=1),
+            values={FeatureHungry.COLUMN: float(entry.home_team_id - entry.away_team_id)},
+        )
+        for entry in records
+    }
+
+
+def test_the_feature_frame_covers_every_league_the_training_frame_does() -> None:
+    """A fold's training frame is the whole guarded past, so its features must be too.
+
+    The frame spans both leagues, and `PerCompetition` splits it by league before fitting. If
+    the engine built the features from one competition's store only, the other league's member
+    would be fitted on an empty frame, and a model that needs a feature would fail on data that
+    is perfectly present.
+    """
+    settings = with_backtest(get_settings(), min_train_matches=1)
+    laliga = get_settings().competition("LALIGA")
+    epl_records = toy_records()
+    laliga_records = [
+        record(
+            entry.match_id + 10_000,
+            entry.home_team_id + 1,
+            entry.away_team_id + 1,
+            entry.kickoff_utc,
+            entry.home_goals,
+            entry.away_goals,
+            season_id=entry.season_id + 10,
+            season_label=entry.season_label,
+            competition_id=2,
+        )
+        for entry in epl_records
+    ]
+    names = (FeatureHungry.COLUMN,)
+    run = WalkForward(
+        [
+            CompetitionHistory(
+                competition=get_settings().competition("EPL"),
+                records=tuple(epl_records),
+                features=stored_features(epl_records),
+                feature_names=names,
+            ),
+            CompetitionHistory(
+                competition=laliga,
+                records=tuple(laliga_records),
+                features=stored_features(laliga_records),
+                feature_names=names,
+            ),
+        ],
+        settings,
+    ).run(lambda: PerCompetition(FeatureHungry))
+
+    assert {fold.competition for fold in run.folds} == {"EPL", "LALIGA"}
+    assert len(run.predictions) == 4 * MATCHES_PER_SEASON

@@ -21,7 +21,7 @@ from predictor import tables
 from predictor.config import Competition, Settings, get_settings
 from predictor.evaluation.backtest import CompetitionHistory
 from predictor.evaluation.frames import StoredFeatures
-from predictor.evaluation.report import ReportRow
+from predictor.evaluation.report import ParameterRow, ReportRow
 from predictor.features import repository as features_repository
 from predictor.logging import get_logger
 
@@ -44,6 +44,9 @@ _RESULT_UPDATES = (
     "rps_gap_ci_low",
     "rps_gap_ci_high",
 )
+
+#: A conflicting parameter row may only have its values replaced; the fold identifies it.
+_PARAMETER_UPDATES = ("parameter_values",)
 
 
 def load_history(
@@ -138,6 +141,55 @@ def upsert_backtest_results(session: Session, records: Sequence[Mapping[str, obj
         )
         written += len(chunk)
     return written
+
+
+def upsert_model_parameters(session: Session, records: Sequence[Mapping[str, object]]) -> int:
+    """Store what each fit learned, idempotently, exactly as the scored slices are stored."""
+    written = 0
+    for chunk in _chunks(records, CHUNK_SIZE):
+        statement = insert(tables.ModelParameters).values(list(chunk))
+        excluded = statement.excluded
+        changed = or_(
+            *(
+                getattr(tables.ModelParameters, column).is_distinct_from(excluded[column])
+                for column in _PARAMETER_UPDATES
+            )
+        )
+        session.execute(
+            statement.on_conflict_do_update(
+                constraint="uq_model_parameters_fit",
+                set_={column: excluded[column] for column in _PARAMETER_UPDATES},
+                where=changed,
+            )
+        )
+        written += len(chunk)
+    return written
+
+
+def latest_parameters(session: Session) -> tuple[ParameterRow, ...]:
+    """Every fit of each model's most recent run, which is what the report tabulates.
+
+    The same newest-run-per-model rule as `latest_results`, so the two tables of one report
+    always describe the same runs.
+    """
+    rows = session.execute(
+        select(tables.ModelParameters, tables.Competition.code, tables.Season.label)
+        .join(tables.Competition, tables.Competition.id == tables.ModelParameters.competition_id)
+        .outerjoin(tables.Season, tables.Season.id == tables.ModelParameters.season_id)
+        .order_by(tables.ModelParameters.created_at, tables.ModelParameters.id)
+    ).all()
+    newest: dict[str, str] = {row.model_name: row.run_id for row, _, _ in rows}
+    return tuple(
+        ParameterRow(
+            model_name=fit.model_name,
+            competition=code,
+            season_label=label,
+            fit_index=fit.fit_index,
+            values=dict(fit.parameter_values),
+        )
+        for fit, code, label in rows
+        if newest[fit.model_name] == fit.run_id
+    )
 
 
 def _chunks(

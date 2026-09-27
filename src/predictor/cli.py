@@ -7,14 +7,25 @@ from typing import Annotated
 import typer
 
 from predictor.config import Competition, Settings, get_settings
-from predictor.evaluation.report import ordered as _report_order
+from predictor.evaluation.report import (
+    COUNT_PARAMETERS,
+)
+from predictor.evaluation.report import (
+    by_model as _report_parameters,
+)
+from predictor.evaluation.report import (
+    ordered as _report_order,
+)
+from predictor.evaluation.report import (
+    parameter_columns as _parameter_columns,
+)
 from predictor.evaluation.service import run_backtest, write_stored_report
 from predictor.features.service import build_features as run_features
 from predictor.ingestion.football_data_uk import FootballDataUkSource
 from predictor.ingestion.seasons import parse_seasons
 from predictor.ingestion.service import ingest as run_ingest
 from predictor.logging import bind_run_id, configure_logging, get_logger
-from predictor.models.registry import MODEL_NAMES
+from predictor.models.registry import MODEL_NAMES, SLOW_MODELS
 from predictor.processing.service import process as run_process
 
 app = typer.Typer(help="Sports results prediction platform", no_args_is_help=True)
@@ -128,6 +139,13 @@ def process(
 RATINGS_SHOWN = 5
 
 
+def _fitted(name: str, value: float | None) -> str:
+    """One fitted parameter for the backtest table, formatted as the report formats it."""
+    if value is None:
+        return "-"
+    return str(int(value)) if name in COUNT_PARAMETERS else format(value, ".4f")
+
+
 @app.command()
 def features(
     version: Annotated[
@@ -196,7 +214,9 @@ def backtest(
         str | None,
         typer.Option(
             help="Comma-separated model names; default: every registered model, which is what "
-            "the RPS gap against the market benchmark needs"
+            "the RPS gap against the market benchmark needs. That default now includes "
+            f"{' and '.join(SLOW_MODELS)}, which sample and search rather than solve: name the "
+            "models explicitly to keep a run short"
         ),
     ] = None,
     seasons: Annotated[
@@ -249,8 +269,25 @@ def backtest(
             f"RPS {comparison.difference:+.4f} "
             f"[{comparison.low:+.4f}, {comparison.high:+.4f}] on {comparison.n} matches, {verdict}"
         )
+    for name, fits in _report_parameters(outcome.parameters):
+        columns = _parameter_columns(fits)
+        typer.echo("")
+        typer.echo(f"{name} fitted parameters")
+        typer.echo(
+            f"{'LEAGUE':<8}{'SEASON':<9}{'FIT':>4}  "
+            + "".join(f"{column:>18}" for column in columns)
+        )
+        for fit in fits:
+            typer.echo(
+                f"{fit.competition:<8}{fit.season_label or '-':<9}{fit.fit_index:>4}  "
+                + "".join(f"{_fitted(name, fit.values.get(name)):>18}" for name in columns)
+            )
+
     typer.echo("")
-    typer.echo(f"{outcome.stored} rows mirrored into backtest_results")
+    typer.echo(
+        f"{outcome.stored} rows mirrored into backtest_results, "
+        f"{outcome.stored_parameters} into model_parameters"
+    )
 
 
 @app.command()
